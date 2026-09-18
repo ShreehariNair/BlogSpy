@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "article": {
+      "title": "Article",
+      "description": "Captured competitor article and intelligence extraction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "competitor": { "type": "string" },
+        "competitorDomain": { "type": "string" },
+        "title": { "type": "string" },
+        "snippet": { "type": "string" },
+        "content": { "type": "string" },
+        "url": { "type": "string" },
+        "method": { "type": "string" },
+        "publishedAt": { "type": "string" },
+        "discoveredAt": { "type": "string" },
+        "delaySec": { "type": "number" },
+        "delayFormatted": { "type": "string" },
+        "targetMet": { "type": "boolean" },
+        "diffPayload": { "type": "string" },
+        "diffAddedWords": { "type": "number" },
+        "tags": { "type": "array" },
+        "threatRating": { "type": "string" },
+        "author": { "type": "string" },
+        "readTime": { "type": "string" },
+        "domSelector": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["competitor", "title", "url"]
+    },
+    "competitor": {
+      "title": "Competitor",
+      "description": "A monitored competitor entity profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "domain": { "type": "string" },
+        "hubUrl": { "type": "string" },
+        "strategy": { "type": "string" },
+        "cadence": { "type": "string" },
+        "avgDelay": { "type": "string" },
+        "status": { "type": "string" },
+        "etagSupported": { "type": "boolean" },
+        "lastArticle": { "type": "string" },
+        "lastDiscovered": { "type": "string" },
+        "feedCount": { "type": "number" },
+        "sitemapCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "domain"]
+    },
+    "log": {
+      "title": "Log",
+      "description": "Telemetry activity or audit event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "level": { "type": "string" },
+        "source": { "type": "string" },
+        "message": { "type": "string" },
+        "durationMs": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["level", "source", "message"]
+    }
+  },
+  "firestore": {
+    "/articles/{articleId}": {
+      "schema": "article",
+      "description": "All competitor articles captured by ingestion crawlers"
+    },
+    "/competitors/{competitorId}": {
+      "schema": "competitor",
+      "description": "Registered competitor website targets"
+    },
+    "/logs/{logId}": {
+      "schema": "log",
+      "description": "Real-time crawler telemetry and health logs"
+    }
+  }
+}

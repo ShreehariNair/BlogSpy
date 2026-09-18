@@ -1,0 +1,6 @@
+{
+  "name": "BlogSpy AI",
+  "description": "Enterprise competitive blog monitoring and real-time content detection platform with AI intelligence analysis and sub-5-minute SLA tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
