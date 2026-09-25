@@ -136,6 +136,20 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                 </div>
                 <span className="text-[10px] font-telemetry-mono text-slate-500">Tab</span>
               </button>
+
+              <button
+                onClick={() => {
+                  onNavigateTab('reports');
+                  onClose();
+                }}
+                className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 transition-colors text-left"
+              >
+                <div className="flex items-center space-x-2">
+                  <FileText className="w-4 h-4 text-purple-600" />
+                  <span>View Reports & Architecture Docs (SLA, Topology, Setup)</span>
+                </div>
+                <span className="text-[10px] font-telemetry-mono text-slate-500">Docs</span>
+              </button>
             </div>
           </div>
 

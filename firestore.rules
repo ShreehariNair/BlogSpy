@@ -10,6 +10,12 @@ service cloud.firestore {
     match /logs/{logId} {
       allow read, write: if true;
     }
+    match /monitoring_checks/{checkId} {
+      allow read, write: if true;
+    }
+    match /retries/{retryId} {
+      allow read, write: if true;
+    }
     match /settings/{settingId} {
       allow read, write: if true;
     }

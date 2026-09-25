@@ -8,6 +8,7 @@ import {
   getFirestore, 
   collection, 
   getDocs, 
+  getDoc,
   doc, 
   setDoc, 
   updateDoc 
@@ -18,9 +19,12 @@ import {
   checkCompetitorTarget, 
   engineMetrics, 
   registerKnownHashes, 
-  generateArticleHash,
-  CrawledArticle 
+  CrawledArticle,
+  formatDelay,
+  formatExactDelayText
 } from "./crawler.js";
+import { continuousWorker } from "./worker.js";
+import { deduplicationEngine } from "./deduplicator.js";
 import { extractUniversalArticleContent } from "./extractor.js";
 import { 
   getSmtpSettings, 
@@ -30,6 +34,16 @@ import {
   updateWebhookSettings,
   dispatchWebhook 
 } from "./notifier.js";
+import { scaleEngine } from "./scaleEngine.js";
+import {
+  getWordPressConfig,
+  updateWordPressConfig,
+  publishToWordPress,
+  getSearchIndexingConfig,
+  updateSearchIndexingConfig,
+  triggerSearchIndexing,
+  getExecutionLogs
+} from "./publisher.js";
 
 dotenv.config();
 
@@ -70,7 +84,7 @@ try {
 }
 
 // Utility to recursively remove undefined fields so Firestore setDoc/updateDoc never fails
-function cleanFirestoreData<T>(data: T): T {
+export function cleanFirestoreData<T>(data: T): T {
   if (data === null || data === undefined) {
     return null as any;
   }
@@ -94,20 +108,30 @@ function cleanFirestoreData<T>(data: T): T {
   return data;
 }
 
+export function getServerDb() {
+  return db;
+}
+
 // Populate known article hashes on server boot to ensure zero duplicate alerts
 export async function syncKnownArticles() {
   if (!db) return;
   try {
     const snap = await getDocs(collection(db, "articles"));
-    const hashes: string[] = [];
+    const existing: any[] = [];
     snap.forEach((d) => {
       const data = d.data();
-      if (data.url && data.title) {
-        hashes.push(generateArticleHash(data.url, data.title));
-      }
+      existing.push({
+        id: d.id,
+        url: data.url,
+        canonicalUrl: data.canonicalUrl,
+        title: data.title,
+        content: data.content,
+        competitorDomain: data.competitorDomain,
+        ingestMethod: data.ingestMethod
+      });
     });
-    registerKnownHashes(hashes);
-    console.log(`[Deduplication Registry] Seeded ${hashes.length} existing article hashes`);
+    deduplicationEngine.syncWithDatabase(existing);
+    console.log(`[Deduplication Registry] Seeded ${existing.length} existing articles into canonical deduplication engine`);
   } catch (e) {
     console.warn("[Deduplication Registry] Warning seeding articles:", e);
   }
@@ -136,23 +160,34 @@ export async function enrichThinArticles() {
           });
 
           if (extracted.content && extracted.content.length > 200) {
-            await updateDoc(
+            await setDoc(
               doc(db, "articles", docSnap.id),
               cleanFirestoreData({
                 content: extracted.content,
+                contentMarkdown: extracted.contentMarkdown,
+                contentHtml: extracted.contentHtml,
                 snippet: extracted.snippet,
                 title: extracted.title || art.title,
                 author: extracted.author || art.author,
                 readTime: extracted.readTime,
                 wordCount: extracted.wordCount,
+                charCount: extracted.charCount,
                 featuredImage: extracted.featuredImage || art.featuredImage || "",
                 inlineImages: extracted.inlineImages || [],
-                citations: extracted.citations || [],
+                mediaCaptures: extracted.mediaCaptures || [],
+                categories: extracted.categories || art.categories || ["Industry Intelligence"],
                 tags: extracted.tags || art.tags || [],
+                metaDescription: extracted.metaDescription || art.metaDescription || "",
+                canonicalUrl: extracted.canonicalUrl || art.canonicalUrl || art.url,
+                originalSourceUrl: extracted.originalSourceUrl || art.url,
+                outgoingLinks: extracted.outgoingLinks || [],
+                citations: extracted.citations || [],
+                structuredMetadata: extracted.structuredMetadata,
                 domSelector: extracted.domSelector,
                 takeaways: extracted.takeaways,
                 updatedAt: new Date().toISOString()
-              })
+              }),
+              { merge: true }
             );
           }
         } catch (enrichErr: any) {
@@ -177,98 +212,9 @@ function getGeminiClient() {
   });
 }
 
-// Background Crawler Scheduler Loop
-let isSweepInProgress = false;
+// Background Crawler Scheduler Loop - Delegates to continuous monitoring worker
 export async function runBackgroundSweep(): Promise<{ newlyDetected: number; sitesPolled: number }> {
-  if (!db || isSweepInProgress) {
-    return { newlyDetected: 0, sitesPolled: 0 };
-  }
-
-  isSweepInProgress = true;
-  let newlyDetected = 0;
-  let sitesPolled = 0;
-
-  try {
-    const compSnap = await getDocs(collection(db, "competitors"));
-    const activeTargets: any[] = [];
-    compSnap.forEach((docSnap) => {
-      const comp = docSnap.data();
-      if (comp.status === "Active") {
-        activeTargets.push({ id: docSnap.id, ...comp });
-      }
-    });
-
-    sitesPolled = activeTargets.length;
-    if (activeTargets.length === 0) {
-      isSweepInProgress = false;
-      return { newlyDetected: 0, sitesPolled: 0 };
-    }
-
-    // Process targets concurrently
-    const checkPromises = activeTargets.map(async (target) => {
-      try {
-        const result = await checkCompetitorTarget({
-          id: target.id,
-          name: target.name,
-          domain: target.domain,
-          blogUrl: target.blogUrl || `https://${target.domain}`,
-          feedUrl: target.feedUrl,
-          strategy: target.strategy || "Hybrid RSS+Sitemap",
-          etag: target.etag
-        });
-
-        // Update competitor lastChecked and etag
-        try {
-          const compRef = doc(db, "competitors", target.id);
-          await updateDoc(compRef, cleanFirestoreData({
-            lastChecked: "Just now",
-            etag: result.etag || target.etag || 'W/"7a3e-9b21"',
-            ...(result.articles.length > 0
-              ? {
-                  lastDetection: result.articles[0].title,
-                  articlesScraped: (target.articlesScraped || 0) + result.articles.length
-                }
-              : {})
-          }));
-        } catch {
-          // ignore error updating competitor
-        }
-
-        // Save newly detected articles to Firestore
-        for (const art of result.articles) {
-          try {
-            const artRef = doc(db, "articles", art.id);
-            await setDoc(artRef, cleanFirestoreData(art));
-            newlyDetected++;
-
-            // Save telemetry log
-            const logRef = doc(db, "logs", `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
-            await setDoc(logRef, cleanFirestoreData({
-              id: logRef.id,
-              timestamp: new Date().toISOString().split("T")[1].slice(0, 12),
-              level: "success",
-              source: "crawler-worker",
-              message: `Detected "${art.title}" from ${art.competitor} in ${art.delayFormatted} via ${art.ingestMethod}`,
-              durationMs: art.delaySec || 0,
-              createdAt: new Date().toISOString()
-            }));
-          } catch (artErr) {
-            console.error("Failed to save detected article to Firestore:", artErr);
-          }
-        }
-      } catch (checkErr: any) {
-        console.warn(`[Crawler] Target check failed for ${target.name}:`, checkErr.message);
-      }
-    });
-
-    await Promise.all(checkPromises);
-  } catch (err) {
-    console.error("[Crawler] Background sweep error:", err);
-  } finally {
-    isSweepInProgress = false;
-  }
-
-  return { newlyDetected, sitesPolled };
+  return continuousWorker.runCycle();
 }
 
 // Create and configure Express application with all API endpoints
@@ -280,16 +226,95 @@ export function createExpressApp(): Express {
 
   // API Route: /api/health
   app.get(["/api/health", "/health"], (req, res) => {
+    const workerStatus = continuousWorker.getStatus();
     res.json({
       status: "healthy",
+      workerRunning: workerStatus.isRunning && !workerStatus.isPaused,
+      cycleCount: workerStatus.cycleCount,
       nodesOnline: `${engineMetrics.successfulChecks} checks`,
       workerPoolLoad: Math.min(100, engineMetrics.activeWorkers * 12.5),
       version: "2.5.0-prod",
       cluster: "US-East-01",
       avgDetectionDelaySec: engineMetrics.fastestDelaySec || 135,
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
-      metrics: engineMetrics
+      metrics: engineMetrics,
+      worker: workerStatus
     });
+  });
+
+  // API Route: /api/monitoring/status (Continuous worker heartbeat & audit status)
+  app.get("/api/monitoring/status", (req, res) => {
+    res.json({
+      success: true,
+      ...continuousWorker.getStatus()
+    });
+  });
+
+  // API Route: /api/monitoring/checks (Persistent check cycle audit records)
+  app.get("/api/monitoring/checks", (req, res) => {
+    const limitCount = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
+    const checks = continuousWorker.getRecentChecks(limitCount);
+    res.json({
+      success: true,
+      count: checks.length,
+      checks
+    });
+  });
+
+  // API Route: /api/monitoring/control (Operator controls for continuous loop)
+  app.post("/api/monitoring/control", async (req, res) => {
+    const { action, intervalMs } = req.body;
+    if (action === "pause") {
+      continuousWorker.pause();
+    } else if (action === "resume") {
+      continuousWorker.resume();
+    } else if (action === "set_interval" && typeof intervalMs === "number") {
+      continuousWorker.setIntervalMs(intervalMs);
+    } else if (action === "trigger") {
+      const outcome = await continuousWorker.triggerImmediateCycle();
+      return res.json({ success: true, message: "Immediate sweep triggered", ...outcome });
+    }
+    res.json({ success: true, status: continuousWorker.getStatus() });
+  });
+
+  // API Route: /api/monitoring/simulate-error (Simulates error & timeout handling to test resilience)
+  app.post("/api/monitoring/simulate-error", async (req, res) => {
+    const { scenario, targetName } = req.body;
+    const validScenarios = ["timeout", "http_500", "http_403", "nominal_304", "live_detection"];
+    const chosenScenario = validScenarios.includes(scenario) ? scenario : "timeout";
+    const checkRecord = await continuousWorker.simulateScenario(chosenScenario as any, targetName || "Acme AI Corp");
+    res.json({
+      success: true,
+      message: `Simulated ${chosenScenario} scenario executed. Resilient error handling verified.`,
+      check: checkRecord,
+      workerStatus: continuousWorker.getStatus()
+    });
+  });
+
+  // API Route: /api/firebase-config (Serves public client Firebase configuration)
+  app.get("/api/firebase-config", (req, res) => {
+    let config: any = null;
+    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (fs.existsSync(configPath)) {
+      try {
+        config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      } catch {}
+    } else if (process.env.FIREBASE_CONFIG) {
+      try {
+        config = JSON.parse(process.env.FIREBASE_CONFIG);
+      } catch {}
+    } else if (process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY) {
+      config = {
+        apiKey: process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY,
+        authDomain: process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN || "",
+        projectId: process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || "",
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || "",
+        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+        appId: process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || "",
+        firestoreDatabaseId: process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID || ""
+      };
+    }
+    res.json(config || {});
   });
 
   // API Route: /api/scale-metrics
@@ -319,17 +344,96 @@ export function createExpressApp(): Express {
     }
   });
 
-  // API Route: /api/probe
+  // API Route: /api/probe (Autonomous Multi-Strategy Discovery)
   app.post("/api/probe", async (req, res) => {
     const { domain, blogUrl } = req.body;
     const target = blogUrl || domain || "timesofindia.indiatimes.com";
     try {
-      const result = await probeWebsite(target);
+      const result = await probeWebsite(target, blogUrl);
       res.json(result);
     } catch (error: any) {
       console.error("Probe error:", error);
       res.status(500).json({ error: error.message || "Failed to probe domain" });
     }
+  });
+
+  // API Route: /api/crawl-target (Direct execution for a specific competitor target)
+  app.post("/api/crawl-target", async (req, res) => {
+    try {
+      const { competitorId } = req.body;
+      if (!competitorId) {
+        return res.status(400).json({ error: "Missing competitorId" });
+      }
+
+      let targetComp: any = null;
+      if (db) {
+        const compSnap = await getDoc(doc(db, "competitors", competitorId));
+        if (compSnap.exists()) {
+          targetComp = { id: compSnap.id, ...compSnap.data() };
+        }
+      }
+
+      if (!targetComp) {
+        return res.status(404).json({ error: "Competitor not found" });
+      }
+
+      const result = await checkCompetitorTarget({
+        id: targetComp.id,
+        name: targetComp.name,
+        domain: targetComp.domain,
+        blogUrl: targetComp.blogUrl || `https://${targetComp.domain}`,
+        feedUrl: targetComp.feedUrl,
+        strategy: targetComp.strategy || "Hybrid RSS+Sitemap",
+        etag: targetComp.etag,
+        discoveredConfig: targetComp.discoveredConfig
+      });
+
+      // Update competitor in DB
+      if (db) {
+        try {
+          const compRef = doc(db, "competitors", targetComp.id);
+          await setDoc(
+            compRef,
+            cleanFirestoreData({
+              ...targetComp,
+              lastChecked: "Just now",
+              etag: result.etag || targetComp.etag || 'W/"7a3e-9b21"',
+              ...(result.articles.length > 0
+                ? {
+                    lastDetection: result.articles[0].title,
+                    articlesScraped: (targetComp.articlesScraped || 0) + result.articles.length
+                  }
+                : {})
+            }),
+            { merge: true }
+          );
+
+          // Save newly detected articles
+          for (const art of result.articles) {
+            const artRef = doc(db, "articles", art.id);
+            await setDoc(artRef, cleanFirestoreData(art), { merge: true });
+          }
+        } catch (dbErr) {
+          console.warn("DB update error in crawl-target:", dbErr);
+        }
+      }
+
+      res.json({
+        success: true,
+        detectedCount: result.articles.length,
+        articles: result.articles,
+        etag: result.etag,
+        message: `Scrape completed for ${targetComp.name}. ${result.articles.length} new articles captured.`
+      });
+    } catch (err: any) {
+      console.error("Crawl target error:", err);
+      res.status(500).json({ error: err.message || "Failed to crawl target" });
+    }
+  });
+
+  // API Route: /api/dedup/stats (Canonical Deduplication Engine Telemetry)
+  app.get("/api/dedup/stats", (req, res) => {
+    res.json(deduplicationEngine.getStats());
   });
 
   // API Route: /api/scrape-article
@@ -346,21 +450,35 @@ export function createExpressApp(): Express {
       if (articleId && db) {
         try {
           const artRef = doc(db, "articles", articleId);
-          await updateDoc(artRef, cleanFirestoreData({
-            content: extracted.content,
-            snippet: extracted.snippet,
-            title: extracted.title,
-            author: extracted.author,
-            readTime: extracted.readTime,
-            wordCount: extracted.wordCount,
-            featuredImage: extracted.featuredImage || "",
-            inlineImages: extracted.inlineImages || [],
-            citations: extracted.citations || [],
-            tags: extracted.tags || [],
-            domSelector: extracted.domSelector,
-            takeaways: extracted.takeaways,
-            updatedAt: new Date().toISOString()
-          }));
+          await setDoc(
+            artRef,
+            cleanFirestoreData({
+              content: extracted.content,
+              contentMarkdown: extracted.contentMarkdown,
+              contentHtml: extracted.contentHtml,
+              snippet: extracted.snippet,
+              title: extracted.title,
+              author: extracted.author,
+              readTime: extracted.readTime,
+              wordCount: extracted.wordCount,
+              charCount: extracted.charCount,
+              featuredImage: extracted.featuredImage || "",
+              inlineImages: extracted.inlineImages || [],
+              mediaCaptures: extracted.mediaCaptures || [],
+              categories: extracted.categories || [],
+              tags: extracted.tags || [],
+              metaDescription: extracted.metaDescription || "",
+              canonicalUrl: extracted.canonicalUrl,
+              originalSourceUrl: extracted.originalSourceUrl,
+              outgoingLinks: extracted.outgoingLinks || [],
+              citations: extracted.citations || [],
+              structuredMetadata: extracted.structuredMetadata,
+              domSelector: extracted.domSelector,
+              takeaways: extracted.takeaways,
+              updatedAt: new Date().toISOString()
+            }),
+            { merge: true }
+          );
         } catch (dbErr: any) {
           console.warn("[Universal Scraper] Firestore sync warning:", dbErr.message);
         }
@@ -431,10 +549,14 @@ Output valid JSON only with this exact schema:
       if (articleId && db) {
         try {
           const artRef = doc(db, "articles", articleId);
-          await updateDoc(artRef, cleanFirestoreData({
-            analysis: parsed,
-            analyzedAt: new Date().toISOString()
-          }));
+          await setDoc(
+            artRef,
+            cleanFirestoreData({
+              analysis: parsed,
+              analyzedAt: new Date().toISOString()
+            }),
+            { merge: true }
+          );
         } catch (dbErr) {
           console.warn("Could not save analysis to Firestore:", dbErr);
         }
@@ -461,36 +583,152 @@ Output valid JSON only with this exact schema:
   app.post("/api/analyze", handleAnalyze);
   app.post("/app/api/analyze", handleAnalyze);
 
-  // API Route: /api/test-publish
+  // API Route: /api/test-publish (Supports live fast SLA, live SLA breach, and historical back-catalog scenarios)
   app.post("/api/test-publish", (req, res) => {
-    const { competitorName, title } = req.body;
+    const { competitorName, title, scenario, delaySec: customDelaySec, isBackCatalog: customIsBackCatalog, publicationSource: customPubSource } = req.body;
     const now = new Date();
-    const publishedAt = new Date(now.getTime() - 14000);
+    
+    let delaySec = 192; // default: 3m 12s
+    let isBackCatalog = false;
+    let defaultSource = "RSS <pubDate>";
+    let breachReason: string | undefined;
+
+    if (scenario === 'live_breach') {
+      delaySec = 522; // 8 minutes 42 seconds
+      isBackCatalog = false;
+      defaultSource = "HTML meta (article:published_time)";
+      breachReason = "Origin RSS cache delay or polling interval alignment threshold exceeded (>5m)";
+    } else if (scenario === 'back_catalog') {
+      delaySec = 172800; // 2 days (48 hours)
+      isBackCatalog = true;
+      defaultSource = "Sitemap <lastmod>";
+    } else if (typeof customDelaySec === 'number' && customDelaySec >= 0) {
+      delaySec = customDelaySec;
+      isBackCatalog = customIsBackCatalog !== undefined ? Boolean(customIsBackCatalog) : delaySec > 1800;
+    }
+
+    if (customPubSource) {
+      defaultSource = customPubSource;
+    }
+
+    const publishedAt = new Date(now.getTime() - delaySec * 1000);
     const discoveredAt = now;
-    const delaySec = 14;
+    const targetMet = isBackCatalog ? true : delaySec <= 300;
+    const ingestType: 'live' | 'back-catalog' = isBackCatalog ? 'back-catalog' : 'live';
+    const slaStatus: 'met' | 'breached' | 'back-catalog' = isBackCatalog ? 'back-catalog' : (targetMet ? 'met' : 'breached');
+    const exactDelayText = formatExactDelayText(delaySec);
+    const delayFormatted = formatDelay(delaySec);
+
+    const rawContent = `Our engineering research discloses production benchmarks and architectural patterns across distributed computing clusters.\n\nEvaluating data freshness, serialization latency, and egress traffic reductions provides predictable operational overhead for high-concurrency enterprise pipelines.\n\nAll metrics are validated against published schemas and live origin headers.`;
+    const heroImg = "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1200&q=80";
+    const inlineImg1 = "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=800&q=80";
+    const inlineImg2 = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80";
+
+    const articleTitle = title || (
+      scenario === 'back_catalog'
+        ? "Historical Architecture Analysis: Distributed Data Mesh Principles"
+        : scenario === 'live_breach'
+        ? "Deep Dive: Asynchronous Stream Consensus & Long-Tail Query Latencies"
+        : "Next-Gen Edge Inference: Bypassing Centralized Lakehouse Latency"
+    );
+
+    const articleUrl = `https://${(competitorName || "acme").toLowerCase().replace(/[^a-z0-9]/g, "")}.com/blog/article-${Date.now().toString(36)}`;
 
     const article = {
-      id: `art-${Date.now()}`,
-      competitor: competitorName || "Acme AI Corp",
-      domain: "acme.ai",
-      title: title || "Unveiling Autonomous Agent Benchmarks for Real-Time Pipelines",
-      snippet: "We are releasing new latency and throughput benchmarks demonstrating sub-50ms round-trip reasoning across sovereign cloud clusters.",
-      url: "https://acme.ai/blog/autonomous-agent-benchmarks",
+      id: `art-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      competitor: competitorName || (scenario === 'back_catalog' ? "Snowflake Developers" : "Acme AI Corp"),
+      competitorDomain: (competitorName || "Acme AI Corp").toLowerCase().replace(/[^a-z0-9]/g, "") + ".com",
+      title: articleTitle,
+      snippet: isBackCatalog
+        ? "Archived analysis detailing distributed multi-cluster synchronization patterns across global cloud infrastructure regions."
+        : "Real-time benchmark results confirming sub-50ms token generation and immediate cache invalidation across distributed edge clusters.",
+      content: rawContent,
+      contentMarkdown: `# ${articleTitle}\n\n${rawContent}\n\n![Cloud Architecture Diagnostics](${inlineImg1} "Multi-region cluster latency breakdown")\n\n![Throughput Benchmarks](${inlineImg2} "Sub-50ms cache replication metrics")`,
+      contentHtml: `<p class="leading-relaxed text-slate-800 my-3">Our engineering research discloses production benchmarks and architectural patterns across distributed computing clusters.</p><p class="leading-relaxed text-slate-800 my-3">Evaluating data freshness, serialization latency, and egress traffic reductions provides predictable operational overhead for high-concurrency enterprise pipelines.</p><figure class="my-5 rounded-xl overflow-hidden border border-slate-200"><img src="${inlineImg1}" alt="Cloud Architecture Diagnostics" class="w-full object-cover rounded-t-xl" /><figcaption class="p-2 text-xs text-slate-500 bg-slate-50 border-t border-slate-100">Multi-region cluster latency breakdown</figcaption></figure><p class="leading-relaxed text-slate-800 my-3">All metrics are validated against published schemas and live origin headers.</p>`,
+      author: "Enterprise Intelligence Staff",
+      readTime: "3 min read",
+      wordCount: 385,
+      charCount: 2420,
+      url: articleUrl,
+      originalSourceUrl: articleUrl,
+      canonicalUrl: articleUrl,
       method: "RSS Feed",
-      publishedAt: publishedAt.toLocaleTimeString(),
-      discoveredAt: discoveredAt.toLocaleTimeString(),
+      ingestMethod: defaultSource.includes("Sitemap") ? "XML Sitemap" : defaultSource.includes("DOM") ? "Direct DOM Poller" : "RSS Feed",
+      publishedAt: publishedAt.toLocaleString(),
+      publishedDate: publishedAt.toISOString(),
+      discoveredAt: discoveredAt.toLocaleString(),
+      discoveredDate: discoveredAt.toISOString(),
+      publicationSource: defaultSource,
       delaySec,
-      delayFormatted: `${delaySec}s delay`,
-      targetMet: true,
-      diffPayload: "1.2KB",
-      tags: ["AI Agents", "Benchmarks", "Controlled Demo"],
-      threatRating: "High"
+      delayFormatted,
+      exactDelayText,
+      targetMet,
+      isBackCatalog,
+      ingestType,
+      slaStatus,
+      slaBreachReason: breachReason,
+      diffPayload: "+1.6KB",
+      featuredImage: heroImg,
+      inlineImages: [heroImg, inlineImg1, inlineImg2],
+      mediaCaptures: [
+        { url: heroImg, alt: articleTitle, caption: "Featured Hero Infrastructure Diagram", isHero: true },
+        { url: inlineImg1, alt: "Cloud Architecture Diagnostics", caption: "Multi-region cluster latency breakdown", isHero: false },
+        { url: inlineImg2, alt: "Throughput Benchmarks", caption: "Sub-50ms cache replication metrics", isHero: false }
+      ],
+      categories: ["Cloud Infrastructure", "Distributed Systems", "Performance"],
+      tags: isBackCatalog 
+        ? ["Historical Archive", "Back-catalog Ingestion", "Database Architecture"] 
+        : (targetMet ? ["Live SLA Met", "Real-Time Pipeline", "Edge Inference"] : ["Live SLA Breached", "Latency Alert", "Benchmarking"]),
+      metaDescription: isBackCatalog
+        ? "Archived technical brief exploring distributed consensus and latency mitigation."
+        : "Production benchmarks demonstrating sub-50ms token generation and cache invalidation.",
+      outgoingLinks: [
+        { text: "Published Specification Docs", url: "https://specs.distributed-data.org/v2", domain: "specs.distributed-data.org", isExternal: true },
+        { text: "Benchmark Dataset GitHub", url: "https://github.com/cloud-bench/stream-latencies", domain: "github.com", isExternal: true }
+      ],
+      structuredMetadata: {
+        lang: "en",
+        wordCount: 385,
+        charCount: 2420,
+        readTime: "3 min read",
+        domSelector: "article.post-content",
+        extractedAt: new Date().toISOString(),
+        hasSchemaOrg: true,
+        hasOpenGraph: true,
+        hasTwitterCard: true,
+        openGraph: {
+          "og:title": articleTitle,
+          "og:description": "Production benchmarks demonstrating sub-50ms token generation and cache invalidation.",
+          "og:image": heroImg,
+          "og:type": "article"
+        }
+      },
+      threatRating: isBackCatalog ? "Medium" : (delaySec <= 300 ? "High" : "Medium"),
+      domSelector: "article.post-content",
+      takeaways: [
+        { 
+          label: isBackCatalog ? "Back-catalog Ingestion" : (targetMet ? "Live SLA Met" : "Live SLA Breached"), 
+          value: isBackCatalog ? `Historical archive item (${exactDelayText} publication delta)` : `Exact detection delay: ${exactDelayText}`, 
+          type: "metric" 
+        },
+        { 
+          label: "Source Provenance", 
+          value: `Extracted timestamp from ${defaultSource}`, 
+          type: "launch" 
+        }
+      ],
+      citations: [
+        { text: "Published Specification Docs", url: "https://specs.distributed-data.org/v2" },
+        { text: "Benchmark Dataset GitHub", url: "https://github.com/cloud-bench/stream-latencies" }
+      ]
     };
 
     res.json({
       success: true,
       article,
-      message: `Controlled demo article published and detected in ${delaySec}s (Target SLA <= 5m Met!)`
+      message: isBackCatalog
+        ? `Historical back-catalog article ingested (${exactDelayText} age). Separated from live SLA benchmark calculation.`
+        : `Live article detected in ${exactDelayText} (${delayFormatted}). 5m SLA target: ${targetMet ? "MET (<=300s)" : "BREACHED (>300s)"}.`
     });
   });
 
@@ -533,7 +771,110 @@ Output valid JSON only with this exact schema:
     res.json(result);
   });
 
+  // ==========================================
+  // WORDPRESS & CMS AUTO-PUBLISHING (VERSION 2)
+  // ==========================================
+  app.get("/api/wordpress/settings", (req, res) => {
+    res.json(getWordPressConfig());
+  });
+
+  app.post("/api/wordpress/settings", (req, res) => {
+    const updated = updateWordPressConfig(req.body);
+    res.json({ success: true, settings: updated });
+  });
+
+  app.post("/api/wordpress/publish", async (req, res) => {
+    const { article } = req.body;
+    if (!article || !article.title) {
+      return res.status(400).json({ success: false, error: "Article data with title is required" });
+    }
+    const result = await publishToWordPress(article);
+    res.json(result);
+  });
+
+  // ==========================================
+  // SEARCH INDEXING INTEGRATION (VERSION 2)
+  // ==========================================
+  app.get("/api/indexing/settings", (req, res) => {
+    res.json(getSearchIndexingConfig());
+  });
+
+  app.post("/api/indexing/settings", (req, res) => {
+    const updated = updateSearchIndexingConfig(req.body);
+    res.json({ success: true, settings: updated });
+  });
+
+  app.post("/api/indexing/publish", async (req, res) => {
+    const { url, type, title } = req.body;
+    if (!url) {
+      return res.status(400).json({ success: false, error: "Target URL is required for search indexing" });
+    }
+    const result = await triggerSearchIndexing({ url, type, title });
+    res.json(result);
+  });
+
+  // API Route: Execution Logs across WordPress & Search Indexing
+  app.get("/api/publisher/logs", (req, res) => {
+    res.json({ success: true, logs: getExecutionLogs() });
+  });
+
+  // ==========================================
+  // SECTION 10: 100-WEBSITE SCALE & CONCURRENCY
+  // ==========================================
+
+  // API Route: Get Scale & Concurrency Telemetry Stats
+  app.get("/api/scale/stats", (req, res) => {
+    res.json({
+      success: true,
+      config: scaleEngine.getConfig(),
+      queueStatus: scaleEngine.getQueueStatus(),
+      systemLoad: scaleEngine.getSystemLoad(),
+      circuitBreakers: scaleEngine.getCircuitBreakers(),
+      activeRetries: scaleEngine.getActiveRetries(),
+      deduplication: scaleEngine.getDeduplicationSummary(),
+      nodesCount: scaleEngine.getNodes().length
+    });
+  });
+
+  // API Route: Get 100 Site Target Nodes
+  app.get("/api/scale/nodes", (req, res) => {
+    res.json({
+      success: true,
+      nodes: scaleEngine.getNodes()
+    });
+  });
+
+  // API Route: Update Scale Engine Concurrency & Load Config
+  app.post("/api/scale/config", (req, res) => {
+    const updated = scaleEngine.updateConfig(req.body);
+    res.json({
+      success: true,
+      config: updated,
+      systemLoad: scaleEngine.getSystemLoad()
+    });
+  });
+
+  // API Route: Execute 100-Website Scale Benchmark Run
+  app.post("/api/scale/benchmark", async (req, res) => {
+    const { scenario = 'nominal' } = req.body;
+    try {
+      const benchmarkResult = await scaleEngine.run100SiteBenchmark(scenario);
+      res.json({
+        success: true,
+        benchmark: benchmarkResult,
+        queueStatus: scaleEngine.getQueueStatus(),
+        systemLoad: scaleEngine.getSystemLoad(),
+        deduplication: scaleEngine.getDeduplicationSummary(),
+        nodes: scaleEngine.getNodes()
+      });
+    } catch (err: any) {
+      console.error("[Scale Engine] Benchmark error:", err);
+      res.status(500).json({ success: false, error: err.message || "Scale benchmark failed" });
+    }
+  });
+
   return app;
 }
 
 export const app = createExpressApp();
+export { continuousWorker, scaleEngine };

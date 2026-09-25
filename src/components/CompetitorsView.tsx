@@ -32,6 +32,7 @@ interface CompetitorsViewProps {
   onAddCompetitor: (competitor: Competitor) => void;
   onToggleStatus: (id: string) => void;
   onStopAllCompetitors: () => void;
+  onStartAllCompetitors?: () => void;
   onForceCrawl: (comp: Competitor) => void;
   onDeleteCompetitor: (id: string) => void;
   isScanning: boolean;
@@ -42,6 +43,7 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
   onAddCompetitor,
   onToggleStatus,
   onStopAllCompetitors,
+  onStartAllCompetitors,
   onForceCrawl,
   onDeleteCompetitor,
   isScanning
@@ -138,18 +140,19 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
       id: `comp-${Date.now()}`,
       name: brandName || finalDomain,
       domain: finalDomain,
-      blogUrl: blogUrl || `https://${finalDomain}/blog`,
-      feedUrl: feedUrl || (probeResult?.rssFeeds?.[0]?.path ? `https://${finalDomain}${probeResult.rssFeeds[0].path}` : ''),
+      blogUrl: blogUrl || probeResult?.discoveredConfig?.blogHubUrl || `https://${finalDomain}/blog`,
+      feedUrl: feedUrl || probeResult?.discoveredConfig?.feedUrl || (probeResult?.rssFeeds?.[0]?.path ? `https://${finalDomain}${probeResult.rssFeeds[0].path}` : ''),
       status: immediateActive ? 'Active' : 'Paused',
-      strategy: probeResult?.recommendedProfile?.strategy || 'Hybrid RSS+Sitemap',
+      strategy: probeResult?.recommendedProfile?.strategy || probeResult?.discoveredConfig?.primaryStrategy || 'Hybrid RSS+Sitemap',
       lastChecked: 'Just now',
       lastDetection: 'Pending initial sweep',
       articlesScraped: probeResult?.rssFeeds[0]?.items || 0,
       healthScore: 100,
-      etag: `W/"${Date.now().toString(16).slice(0, 8)}"`,
-      cadence: '15m polling',
+      etag: probeResult?.etag || `W/"${Date.now().toString(16).slice(0, 8)}"`,
+      cadence: probeResult?.discoveredConfig ? `${Math.round(probeResult.discoveredConfig.pollingCadenceSec / 60)}m polling` : '15m polling',
       detectedFeeds: probeResult?.rssFeeds.map(f => f.path) || ['/feed'],
-      discoveredSitemaps: probeResult?.sitemaps.map(s => s.path) || ['/sitemap.xml']
+      discoveredSitemaps: probeResult?.sitemaps.map(s => s.path) || ['/sitemap.xml'],
+      discoveredConfig: probeResult?.discoveredConfig
     };
 
     onAddCompetitor(newComp);
@@ -193,6 +196,8 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
   const startRange = totalItems === 0 ? 0 : (validCurrentPage - 1) * (typeof pageSize === 'number' ? pageSize : totalItems) + 1;
   const endRange = pageSize === 'all' ? totalItems : Math.min(validCurrentPage * (pageSize as number), totalItems);
 
+  const liveScrapersCount = competitors.filter(c => c.status === 'Active').length;
+
   return (
     <div id="competitors-view-container" className="p-4 sm:p-6 lg:p-8 space-y-6 sm:space-y-8 max-w-[1600px] mx-auto">
       {/* Metric Strip Header */}
@@ -202,10 +207,18 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
             Active Ingestion Feeds
           </div>
           <div className="text-2xl font-bold text-slate-900 font-mono-tech">
-            {competitors.filter(c => c.status === 'Active').length} / {competitors.length}
+            {liveScrapersCount} / {competitors.length}
           </div>
-          <div className="text-xs text-emerald-700 font-medium flex items-center font-telemetry-mono">
-            <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" /> 100% Operational
+          <div className={`text-xs font-medium flex items-center font-telemetry-mono ${liveScrapersCount > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+            {liveScrapersCount > 0 ? (
+              <>
+                <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" /> {liveScrapersCount} Operational
+              </>
+            ) : (
+              <>
+                <Pause className="w-3 h-3 mr-1 text-amber-600" /> All Scrapers Paused
+              </>
+            )}
           </div>
         </div>
 
@@ -354,45 +367,51 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
 
                 {/* Grid of discovered endpoints */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  {/* Blog Hub */}
-                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1 shadow-2xs">
+                  {/* Blog Hub & HTML Structure */}
+                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 shadow-2xs">
                     <div className="flex items-center space-x-1.5 text-indigo-700 font-semibold font-telemetry-mono">
                       <Globe className="w-3.5 h-3.5" />
-                      <span>Blog Hub URL</span>
+                      <span>Blog Hub & Direct HTML</span>
                     </div>
                     <div className="font-telemetry-mono text-slate-800 text-[11px] truncate">
                       {probeResult.blogHubUrl}
                     </div>
-                    <div className="text-[10px] text-emerald-700 font-telemetry-mono font-medium">
-                      Confidence: {probeResult.blogHubConfidence}%
+                    <div className="text-[10px] text-slate-500 font-telemetry-mono space-y-0.5">
+                      <div>Container: <span className="text-indigo-600 font-semibold">{probeResult.discoveredConfig?.htmlSelectors.articleContainer || 'article'}</span></div>
+                      <div>Title: <span className="text-indigo-600 font-semibold">{probeResult.discoveredConfig?.htmlSelectors.titleSelector || 'h2 a'}</span></div>
+                      <div>Canonical: <span className="text-emerald-700 font-semibold">{probeResult.microdata.canonicalTag}</span></div>
                     </div>
                   </div>
 
                   {/* RSS Feeds */}
-                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1 shadow-2xs">
+                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 shadow-2xs">
                     <div className="flex items-center space-x-1.5 text-emerald-700 font-semibold font-telemetry-mono">
                       <Rss className="w-3.5 h-3.5" />
-                      <span>Discovered Feeds</span>
+                      <span>RSS / Atom Feeds</span>
                     </div>
                     <div className="font-telemetry-mono text-slate-800 text-[11px] truncate">
                       {probeResult.rssFeeds[0]?.path || 'None found'}
                     </div>
-                    <div className="text-[10px] text-slate-500 font-telemetry-mono">
-                      {probeResult.rssFeeds[0]?.status} ({probeResult.rssFeeds[0]?.items} items)
+                    <div className="text-[10px] text-slate-500 font-telemetry-mono space-y-0.5">
+                      <div>Status: <span className="text-emerald-700 font-semibold">{probeResult.rssFeeds[0]?.status}</span></div>
+                      <div>Format: <span className="text-slate-700 font-semibold">{probeResult.rssFeeds[0]?.items ? `${probeResult.rssFeeds[0]?.items} items discovered` : '0 items'}</span></div>
+                      <div>Latency SLA: <span className="text-emerald-700 font-semibold">&lt; 2m detection</span></div>
                     </div>
                   </div>
 
                   {/* Sitemaps */}
-                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1 shadow-2xs">
+                  <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 shadow-2xs">
                     <div className="flex items-center space-x-1.5 text-amber-700 font-semibold font-telemetry-mono">
                       <FileCode className="w-3.5 h-3.5" />
-                      <span>XML Sitemaps</span>
+                      <span>XML Sitemaps & Indices</span>
                     </div>
                     <div className="font-telemetry-mono text-slate-800 text-[11px] truncate">
                       {probeResult.sitemaps[0]?.path || 'None'}
                     </div>
-                    <div className="text-[10px] text-slate-500 font-telemetry-mono">
-                      {probeResult.sitemaps[0]?.indexedUrls} Indexed URLs
+                    <div className="text-[10px] text-slate-500 font-telemetry-mono space-y-0.5">
+                      <div>Type: <span className="text-slate-700 font-semibold">{probeResult.sitemaps[0]?.type}</span></div>
+                      <div>Indexed URLs: <span className="text-slate-700 font-semibold">{probeResult.sitemaps[0]?.indexedUrls} URLs</span></div>
+                      <div>LastMod: <span className="text-amber-700 font-semibold">{probeResult.sitemaps[0]?.hasLastMod ? 'Supported (Delta Check)' : 'Standard'}</span></div>
                     </div>
                   </div>
                 </div>
@@ -443,15 +462,40 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto">
-            {/* Stop All Button */}
-            <button
-              id="stop-all-scrapers-btn"
-              onClick={onStopAllCompetitors}
-              className="w-full sm:w-auto bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-800 border border-amber-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
-            >
-              <Pause className="w-3.5 h-3.5 text-amber-700" />
-              <span>Stop All Scrapers</span>
-            </button>
+            {/* Dynamic Stop / Start All Scrapers Button */}
+            {liveScrapersCount > 0 ? (
+              <button
+                id="stop-all-scrapers-btn"
+                onClick={onStopAllCompetitors}
+                disabled={isScanning}
+                className="w-full sm:w-auto bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-800 border border-amber-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                title="Pause background polling for all active scrapers"
+              >
+                <Pause className="w-3.5 h-3.5 text-amber-700" />
+                <span>Stop All Scrapers</span>
+                <span className="ml-1 px-1.5 py-0.5 bg-amber-200/70 rounded-full text-[10px] font-telemetry-mono font-medium">
+                  {liveScrapersCount} live
+                </span>
+              </button>
+            ) : (
+              <button
+                id="start-all-scrapers-btn"
+                onClick={onStartAllCompetitors || onStopAllCompetitors}
+                disabled={isScanning || competitors.length === 0}
+                className="w-full sm:w-auto bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-800 border border-emerald-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                title="Activate all competitor targets and immediately scrape all sites"
+              >
+                {isScanning ? (
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
+                ) : (
+                  <Play className="w-3.5 h-3.5 text-emerald-700 fill-emerald-700" />
+                )}
+                <span>{isScanning ? 'Scraping All Sites...' : 'Start All Scrapers & Scrape Sites'}</span>
+                <span className="ml-1 px-1.5 py-0.5 bg-emerald-200/70 rounded-full text-[10px] font-telemetry-mono font-medium">
+                  {competitors.length} sites
+                </span>
+              </button>
+            )}
 
             {/* Search */}
             <div className="relative w-full sm:w-56 lg:w-64">
@@ -743,19 +787,32 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
                 <div className="font-semibold text-indigo-700 font-telemetry-mono">
                   {inspectCompetitor.strategy} ({inspectCompetitor.cadence})
                 </div>
+                {inspectCompetitor.strategy === 'Hybrid RSS+Sitemap' && (
+                  <p className="text-[11px] text-emerald-700 font-medium">
+                    Dual active monitoring: Polling RSS feed for instant notifications (&lt;2m) and XML Sitemap index for back-catalog integrity. Canonical deduplication engine active.
+                  </p>
+                )}
               </div>
 
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
-                <span className="text-slate-500">ETag Cache Signature</span>
+                <span className="text-slate-500">ETag Cache & Selectors</span>
                 <div className="font-telemetry-mono text-emerald-700 font-medium">
                   {inspectCompetitor.etag || 'Active HTTP ETag validator'}
                 </div>
+                {inspectCompetitor.discoveredConfig && (
+                  <div className="text-[10px] text-slate-600 font-telemetry-mono pt-1">
+                    Container: {inspectCompetitor.discoveredConfig.htmlSelectors.articleContainer} | Title: {inspectCompetitor.discoveredConfig.htmlSelectors.titleSelector}
+                  </div>
+                )}
               </div>
 
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
-                <span className="text-slate-500">Detected Feeds & Sitemaps</span>
-                <div className="font-telemetry-mono text-slate-700">
-                  {inspectCompetitor.feedUrl || '/feed.xml'} | /sitemap.xml
+                <span className="text-slate-500">Configured Endpoints</span>
+                <div className="font-telemetry-mono text-slate-700 truncate">
+                  Feed: {inspectCompetitor.feedUrl || inspectCompetitor.discoveredConfig?.feedUrl || '/feed'}
+                </div>
+                <div className="font-telemetry-mono text-slate-700 truncate">
+                  Sitemap: {inspectCompetitor.discoveredConfig?.sitemapUrl || '/sitemap.xml'}
                 </div>
               </div>
 
@@ -766,7 +823,7 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
                     handleTriggerCrawlRow(inspectCompetitor);
                     setInspectCompetitor(null);
                   }}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-semibold shadow-xs"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-semibold shadow-xs cursor-pointer"
                 >
                   Force Scrape Now
                 </button>

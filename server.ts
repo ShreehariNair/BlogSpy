@@ -7,7 +7,8 @@ import {
   app, 
   syncKnownArticles, 
   enrichThinArticles, 
-  runBackgroundSweep 
+  runBackgroundSweep,
+  continuousWorker
 } from "./server/app.js";
 
 dotenv.config();
@@ -22,8 +23,8 @@ async function startServer() {
   await syncKnownArticles();
   setTimeout(enrichThinArticles, 3000);
 
-  // Background interval: Automatically sweeps every 60 seconds
-  setInterval(runBackgroundSweep, 60000);
+  // Initialize and start autonomous Continuous Monitoring Worker
+  await continuousWorker.init();
 
   // Vite middleware in dev, static files in production
   if (process.env.NODE_ENV !== "production") {

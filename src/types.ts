@@ -3,7 +3,8 @@ export type NavigationTab =
   | 'competitors'
   | 'reader'
   | 'scale'
-  | 'integrations';
+  | 'integrations'
+  | 'reports';
 
 export type IngestionStrategy = 
   | 'Hybrid RSS+Sitemap'
@@ -23,6 +24,37 @@ export interface GeminiAnalysis {
   source?: string;
 }
 
+export interface MediaCaptureItem {
+  url: string;
+  alt?: string;
+  caption?: string;
+  width?: number;
+  height?: number;
+  isHero?: boolean;
+}
+
+export interface OutgoingLinkItem {
+  text: string;
+  url: string;
+  domain: string;
+  isExternal: boolean;
+}
+
+export interface StructuredMetadataPayload {
+  jsonLd?: Record<string, any>[];
+  openGraph?: Record<string, string>;
+  twitter?: Record<string, string>;
+  lang?: string;
+  wordCount?: number;
+  charCount?: number;
+  readTime?: string;
+  domSelector?: string;
+  extractedAt?: string;
+  hasSchemaOrg?: boolean;
+  hasOpenGraph?: boolean;
+  hasTwitterCard?: boolean;
+}
+
 export interface Article {
   id: string;
   competitor: string;
@@ -30,20 +62,37 @@ export interface Article {
   title: string;
   snippet: string;
   content: string;
+  contentMarkdown?: string;
+  contentHtml?: string;
   author: string;
   readTime: string;
   url: string;
+  originalSourceUrl?: string;
+  canonicalUrl?: string;
   publishedAt: string;
   discoveredAt: string;
+  publishedDate?: string; // ISO 8601 string for exact mathematical precision
+  discoveredDate?: string; // ISO 8601 string of discovery
+  publicationSource?: string; // Source of publication timestamp: RSS <pubDate>, Sitemap <lastmod>, JSON-LD datePublished, HTML meta article:published_time, etc.
   delaySec: number;
   delayFormatted: string;
-  targetMet: boolean; // <= 300s (5 min)
+  exactDelayText?: string; // e.g. "3 minutes 12 seconds" or "20 minutes 0 seconds"
+  targetMet: boolean; // <= 300s (5 min) SLA benchmark
+  isBackCatalog?: boolean; // Separates initial historical archive ingestion from live new article detections
+  ingestType?: 'live' | 'back-catalog';
+  slaStatus?: 'met' | 'breached' | 'back-catalog';
   ingestMethod: 'RSS Feed' | 'XML Sitemap' | 'Direct DOM Poller';
   diffPayload: string;
   diffAddedWords?: number;
+  categories?: string[];
   tags: string[];
+  metaDescription?: string;
   threatRating: ThreatRating;
   featuredImage?: string;
+  inlineImages?: string[];
+  mediaCaptures?: MediaCaptureItem[];
+  outgoingLinks?: OutgoingLinkItem[];
+  structuredMetadata?: StructuredMetadataPayload;
   takeaways: {
     label: string;
     value: string;
@@ -57,10 +106,32 @@ export interface Article {
   analysis?: GeminiAnalysis;
   rawPayload?: Record<string, any>;
   slaBreachReason?: string;
-  inlineImages?: string[];
   wordCount?: number;
-  canonicalUrl?: string;
-  metaDescription?: string;
+  charCount?: number;
+}
+
+export interface DiscoveredConfig {
+  primaryStrategy: IngestionStrategy;
+  activeStrategies: ('RSS Feed' | 'XML Sitemap' | 'Direct DOM Poller')[];
+  feedUrl?: string;
+  sitemapUrl?: string;
+  subSitemaps?: string[];
+  blogHubUrl: string;
+  urlPattern?: string;
+  etagSupported: boolean;
+  initialEtag?: string;
+  hasLastModInSitemap: boolean;
+  htmlSelectors: {
+    articleContainer: string;
+    titleSelector: string;
+    dateSelector: string;
+    authorSelector: string;
+    canonicalTagSelector: string;
+  };
+  supports304: boolean;
+  pollingCadenceSec: number;
+  avgDetectionExpected: string;
+  discoveredAt: string;
 }
 
 export interface Competitor {
@@ -79,13 +150,14 @@ export interface Competitor {
   cadence: string;
   detectedFeeds?: string[];
   discoveredSitemaps?: string[];
+  discoveredConfig?: DiscoveredConfig;
 }
 
 export interface SiteNode {
   id: number;
   name: string;
   domain: string;
-  status: 'nominal' | 'polling' | 'backoff' | 'offline';
+  status: 'nominal' | 'polling' | 'backoff' | 'offline' | 'queued' | 'rate_limited';
   strategy: IngestionStrategy;
   latencyMs: number;
   lastPolledSecAgo: number;
@@ -94,6 +166,90 @@ export interface SiteNode {
   statusCode: number;
   region: string;
   articlesCount: number;
+  // Section 10 High-Scale Fields
+  slotId?: number;
+  batchIndex?: number;
+  circuitBreakerState?: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+  activeRetriesCount?: number;
+  lastError?: string;
+  dedupSignature?: string;
+  socketTimeMs?: number;
+  bandwidthBytes?: number;
+}
+
+export interface ScaleQueueStatus {
+  total: number;
+  queued: number;
+  processing: number;
+  completed: number;
+  cached: number;
+  failed: number;
+  retrying: number;
+  rateLimited: number;
+  timedOut: number;
+}
+
+export interface ScaleSystemLoad {
+  cpuLoopLagMs: number;
+  activeSockets: number;
+  maxSockets: number;
+  socketUtilizationPct: number;
+  throughputItemsPerSec: number;
+  egressKbPerSec: number;
+  memoryUsageMb: number;
+  eventLoopHealth: 'OPTIMAL' | 'DEGRADED' | 'OVERLOADED';
+}
+
+export interface CircuitBreakerRecord {
+  domain: string;
+  state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+  failureCount: number;
+  failureThreshold: number;
+  lastFailureAt: string;
+  nextTrialAt: string;
+  cooldownSecRemaining: number;
+  consecutiveSuccesses: number;
+  reason: string;
+}
+
+export interface DeduplicationMetrics {
+  totalProcessed: number;
+  uniqueIngested: number;
+  duplicatesBlocked: number;
+  canonicalMatches: number;
+  contentHashMatches: number;
+  simHashMatches: number;
+  duplicateRatePct: number;
+  zeroLeakageVerified: boolean;
+  recentBlockedHashes: {
+    hash: string;
+    domain: string;
+    title: string;
+    matchType: 'canonical_url' | 'content_hash' | 'simhash_title';
+    timestamp: string;
+  }[];
+}
+
+export interface ScaleBenchmarkResult {
+  id: string;
+  timestamp: string;
+  scenario: 'nominal' | 'slow_timeouts' | 'rate_limits' | 'syndication_storm';
+  totalTargets: number;
+  concurrencyLimit: number;
+  batchSize: number;
+  elapsedMs: number;
+  throughputPerSec: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
+  p99LatencyMs: number;
+  nominal200Count: number;
+  cached304Count: number;
+  timeout504Count: number;
+  rateLimited429Count: number;
+  circuitBreakersTripped: number;
+  bandwidthSavedKb: number;
+  duplicatesBlocked: number;
+  zeroDuplicateGuarantee: boolean;
 }
 
 export interface TelemetryLog {
@@ -103,6 +259,23 @@ export interface TelemetryLog {
   source: string;
   message: string;
   durationMs?: number;
+}
+
+export interface MonitoringCheck {
+  id: string;
+  timestamp: string;
+  competitorId: string;
+  competitorName: string;
+  domain: string;
+  strategy: string;
+  statusCode: number;
+  statusResponse: string;
+  durationMs: number;
+  outcome: 'success' | 'cached' | 'error' | 'rate_limited';
+  articlesDetected: number;
+  error?: string;
+  recoveryAction?: string;
+  createdAt?: string;
 }
 
 export interface RetryEvent {
@@ -115,6 +288,7 @@ export interface RetryEvent {
   maxAttempts: number;
   resolution: 'Recovered' | 'Backoff' | 'Pending';
   backoffDelay: string;
+  createdAt?: string;
 }
 
 export interface ProbeResult {
@@ -124,12 +298,14 @@ export interface ProbeResult {
   blogHubUrl: string;
   blogHubConfidence: number;
   rssFeeds: { path: string; status: string; items: number; live: boolean }[];
-  sitemaps: { path: string; indexedUrls: number; type: string }[];
+  sitemaps: { path: string; indexedUrls: number; type: string; hasLastMod?: boolean; subSitemaps?: string[] }[];
   microdata: {
     canonicalTag: string;
     publishedDateSelector: string;
     authorSelector: string;
     openGraphDetected: boolean;
+    jsonLdDetected?: boolean;
+    articlePatternDetected?: string;
   };
   recommendedProfile: {
     strategy: IngestionStrategy;
@@ -137,6 +313,10 @@ export interface ProbeResult {
     avgDetectionExpected: string;
     description: string;
   };
+  discoveredConfig?: DiscoveredConfig;
+  latencyMs?: number;
+  serverHeader?: string;
+  etag?: string;
 }
 
 export interface SmtpConfig {

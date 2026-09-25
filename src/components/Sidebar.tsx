@@ -9,7 +9,8 @@ import {
   CheckCircle2, 
   SlidersHorizontal,
   ExternalLink,
-  X
+  X,
+  BarChart3
 } from 'lucide-react';
 import { NavigationTab } from '../types';
 
@@ -60,6 +61,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Auto-Publish & Hooks',
       icon: Send,
       badge: 'v2.4'
+    },
+    {
+      id: 'reports' as NavigationTab,
+      label: 'Reports & Docs',
+      icon: BarChart3,
+      badge: 'SLA'
     }
   ];
 
