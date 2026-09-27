@@ -233,7 +233,7 @@ export interface DeduplicationMetrics {
 export interface ScaleBenchmarkResult {
   id: string;
   timestamp: string;
-  scenario: 'nominal' | 'slow_timeouts' | 'rate_limits' | 'syndication_storm';
+  scenario: 'nominal' | 'slow_timeouts' | 'rate_limits' | 'syndication_storm' | 'real_web_scrape';
   totalTargets: number;
   concurrencyLimit: number;
   batchSize: number;

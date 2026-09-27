@@ -35,17 +35,22 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onPublishTestPost
 }) => {
   const [query, setQuery] = useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  // Clear query and focus input when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setQuery('');
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        if (isOpen) onClose();
-        else {
-          // Open
-        }
-      }
       if (e.key === 'Escape' && isOpen) {
+        e.preventDefault();
         onClose();
       }
     };
@@ -66,15 +71,20 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-start justify-center pt-20 p-4 animate-in fade-in">
+    <div 
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-start justify-center pt-20 p-4 animate-in fade-in"
+      onClick={onClose}
+    >
       <div 
         id="command-palette-dialog"
+        onClick={(e) => e.stopPropagation()}
         className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95"
       >
         {/* Search Input Bar */}
         <div className="flex items-center px-4 py-3 border-b border-slate-100">
           <Search className="w-5 h-5 text-indigo-600 mr-3 shrink-0" />
           <input
+            ref={inputRef}
             type="text"
             placeholder="Type a command, search articles, or competitor domain..."
             value={query}

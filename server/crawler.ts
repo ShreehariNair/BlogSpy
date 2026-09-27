@@ -456,8 +456,59 @@ export async function pollXmlSitemap(
       }
     }
 
+    // Intelligent candidate URL filtering: Prioritize URLs that look like blog posts or articles
+    const isLikelyArticleUrl = (urlStr: string) => {
+      const lower = urlStr.toLowerCase();
+      try {
+        const parsed = new URL(urlStr);
+        const p = parsed.pathname.toLowerCase();
+        if (
+          p === '/' ||
+          p === '' ||
+          /^\/(locations|sitemap|privacy|terms|cookie|about|contact|careers|jobs|legal|investor|sustainability|environmental-sustainability|brands|community-impact|equality-and-inclusion|ethics-and-corporate-responsibility|products|solutions|pricing|login|signup|auth)(\/.*)?$/i.test(p)
+        ) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+      return (
+        lower.includes('/blog/') ||
+        lower.includes('/blogs/') ||
+        lower.includes('/post/') ||
+        lower.includes('/posts/') ||
+        lower.includes('/article/') ||
+        lower.includes('/articles/') ||
+        lower.includes('/news/') ||
+        lower.includes('/press/') ||
+        lower.includes('/press-release') ||
+        lower.includes('/story/') ||
+        lower.includes('/stories/') ||
+        lower.includes('/insights/') ||
+        lower.includes('/updates/') ||
+        /\/(202[0-9])\/([0-9]{2})\//.test(lower) ||
+        /\/(202[0-9])-([0-9]{2})/.test(lower) ||
+        // Multi-level slug e.g. /category/slug-with-many-words
+        /\/[a-z0-9-_]+\/[a-z0-9-]{10,}(\/|\.html)?$/i.test(lower)
+      );
+    };
+
+    const prioritized = candidateUrls.filter(u => isLikelyArticleUrl(u.loc));
+    const targetCandidates = prioritized.length > 0 ? prioritized : candidateUrls.filter(u => {
+      try {
+        const p = new URL(u.loc).pathname.toLowerCase();
+        return (
+          p !== '/' &&
+          p !== '' &&
+          !/^\/(locations|sitemap|privacy|terms|cookie|about|contact|careers|jobs|legal|investor|sustainability|environmental-sustainability|brands)(\/.*)?$/i.test(p)
+        );
+      } catch {
+        return true;
+      }
+    });
+
     // Inspect top candidate URLs from sitemap
-    for (const u of candidateUrls.slice(0, 5)) {
+    for (const u of targetCandidates.slice(0, 8)) {
       const link = u.loc.trim();
       if (!link) continue;
 
@@ -477,6 +528,12 @@ export async function pollXmlSitemap(
           competitorName,
           competitorDomain
         });
+
+        // Skip non-articles or unreachable pages
+        if (extracted.success === false || (!extracted.content && !extracted.title)) {
+          deduplicationEngine.releaseInFlight(link, extracted.canonicalUrl);
+          continue;
+        }
 
         // Tier 2 Deep Canonical & Content Hash Deduplication Check
         const deepCheck = deduplicationEngine.checkDuplicate({
@@ -624,9 +681,22 @@ export async function pollDirectDom(
 
     // Use stored selector or universal fallbacks
     const selector = storedSelectors?.articleContainer ||
-      "article, .post, .blog-post, .card, h1 a, h2 a, h3 a, a[href*='/blog/'], a[href*='/news/'], a[href*='articleshow'], a[href*='/article/'], a[href*='/story/'], a[href*='/post/'], a[data-testid*='article']";
+      "article, .post, .blog-post, .card, h1 a, h2 a, h3 a, a[href*='/blog/'], a[href*='/blogs/'], a[href*='/news/'], a[href*='/press/'], a[href*='/press-release/'], a[href*='/press-releases/'], a[href*='articleshow'], a[href*='/article/'], a[href*='/story/'], a[href*='/post/'], a[data-testid*='article']";
 
-    const candidateElements = $(selector).slice(0, 5);
+    const candidateElements = $(selector)
+      .filter((_, el) => {
+        const href = $(el).is("a") ? $(el).attr("href") : $(el).find("a").first().attr("href");
+        if (!href) return false;
+        try {
+          const abs = new URL(href, blogUrl).toString();
+          const cleanAbs = abs.split("?")[0].replace(/\/$/, "");
+          const cleanBlog = blogUrl.split("?")[0].replace(/\/$/, "");
+          return cleanAbs !== cleanBlog && cleanAbs.length > cleanBlog.length;
+        } catch {
+          return false;
+        }
+      })
+      .slice(0, 8);
 
     for (const el of candidateElements.toArray()) {
       const $el = $(el);
@@ -659,6 +729,12 @@ export async function pollDirectDom(
           competitorName,
           competitorDomain
         });
+
+        // Skip non-articles or unreachable pages
+        if (extracted.success === false || (!extracted.content && !extracted.title)) {
+          deduplicationEngine.releaseInFlight(href, extracted.canonicalUrl);
+          continue;
+        }
 
         // Tier 2 Deep Canonical & Content Hash Deduplication Check
         const deepCheck = deduplicationEngine.checkDuplicate({
@@ -841,26 +917,39 @@ export async function checkCompetitorTarget(
           if (sitemapOutcome.value.etag) resultingEtag = sitemapOutcome.value.etag;
         }
 
-        // If both failed, fall back to direct DOM poller
-        if (rssOutcome.status === "rejected" && sitemapOutcome.status === "rejected") {
-          const domResult = await pollDirectDom(
-            target.blogUrl,
-            target.name,
-            target.domain,
-            target.etag,
-            target.discoveredConfig?.htmlSelectors
-          );
-          for (const a of domResult.articles) {
-            combinedArticles.push(a);
-          }
-          if (domResult.etag) resultingEtag = domResult.etag;
+        // If both failed or yielded 0 articles, fall back to direct DOM poller on blog hub
+        if ((combinedArticles.length === 0 || (rssOutcome.status === "rejected" && sitemapOutcome.status === "rejected")) && target.blogUrl) {
+          try {
+            const domResult = await pollDirectDom(
+              target.blogUrl,
+              target.name,
+              target.domain,
+              target.etag,
+              target.discoveredConfig?.htmlSelectors
+            );
+            for (const a of domResult.articles) {
+              combinedArticles.push(a);
+            }
+            if (domResult.etag) resultingEtag = domResult.etag;
+          } catch {}
         }
       } else if (target.feedUrl || target.strategy.includes("RSS")) {
         // RSS Stream Strategy
         const feed = target.feedUrl || target.discoveredConfig?.feedUrl || `https://${target.domain}/feed`;
-        const rssResult = await pollRssFeed(feed, target.name, target.domain).catch(async () => {
+        let rssResult = await pollRssFeed(feed, target.name, target.domain).catch(async () => {
           return pollDirectDom(target.blogUrl, target.name, target.domain, target.etag, target.discoveredConfig?.htmlSelectors);
         });
+        
+        // Intelligent fallback: If RSS yielded 0 articles, probe direct DOM
+        if (rssResult.articles.length === 0 && target.blogUrl) {
+          try {
+            const domFallback = await pollDirectDom(target.blogUrl, target.name, target.domain, target.etag, target.discoveredConfig?.htmlSelectors);
+            if (domFallback.articles.length > 0) {
+              rssResult = { articles: domFallback.articles, etag: domFallback.etag };
+            }
+          } catch {}
+        }
+
         for (const a of rssResult.articles) {
           combinedArticles.push(a);
         }
@@ -868,9 +957,20 @@ export async function checkCompetitorTarget(
       } else if (target.strategy.includes("Sitemap")) {
         // Sitemap Index Strategy
         const sitemap = target.discoveredConfig?.sitemapUrl || `https://${target.domain}/sitemap.xml`;
-        const sitemapResult = await pollXmlSitemap(sitemap, target.name, target.domain).catch(async () => {
+        let sitemapResult = await pollXmlSitemap(sitemap, target.name, target.domain).catch(async () => {
           return pollDirectDom(target.blogUrl, target.name, target.domain, target.etag, target.discoveredConfig?.htmlSelectors);
         });
+
+        // Intelligent fallback: If sitemap yielded 0 articles, probe direct DOM on blog hub
+        if (sitemapResult.articles.length === 0 && target.blogUrl) {
+          try {
+            const domFallback = await pollDirectDom(target.blogUrl, target.name, target.domain, target.etag, target.discoveredConfig?.htmlSelectors);
+            if (domFallback.articles.length > 0) {
+              sitemapResult = { articles: domFallback.articles, etag: domFallback.etag };
+            }
+          } catch {}
+        }
+
         for (const a of sitemapResult.articles) {
           combinedArticles.push(a);
         }

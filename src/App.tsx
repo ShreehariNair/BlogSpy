@@ -22,6 +22,7 @@ import {
   saveLogToDb,
   safeAuthor
 } from './services/db';
+import { sortArticlesDescending } from './utils/articleSort';
 
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -53,10 +54,22 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Global Keyboard Shortcuts (Ctrl+K / Cmd+K)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setIsSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Firestore Real-Time Subscriptions
   useEffect(() => {
     const unsubArticles = subscribeToArticles((data) => {
-      setArticles(data);
+      setArticles(sortArticlesDescending(data));
     });
 
     const unsubCompetitors = subscribeToCompetitors((data) => {
@@ -338,7 +351,23 @@ export default function App() {
     try {
       await saveCompetitorToDb(newComp);
       await addLog('info', 'discovery-engine', `Onboarded new competitor to Firestore: ${newComp.name} (${newComp.strategy})`);
-      showToast(`Added ${newComp.name} to Firestore database!`);
+      showToast(`Added ${newComp.name}! Running initial sweep...`);
+
+      // Immediately execute initial sweep if active so competitor doesn't stay pending
+      if (newComp.status === 'Active') {
+        fetch('/api/crawl-target', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ competitorId: newComp.id })
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data?.success) {
+              showToast(`Initial sweep complete for ${newComp.name} (${data.detectedCount} posts detected)`);
+            }
+          })
+          .catch(e => console.warn('Auto initial sweep notice:', e));
+      }
     } catch (err) {
       console.error('Failed to add competitor:', err);
       showToast(`Failed to add ${newComp.name}`);
@@ -551,6 +580,7 @@ export default function App() {
           {activeTab === 'competitors' && (
             <CompetitorsView
               competitors={competitors}
+              articles={articles}
               onAddCompetitor={handleAddCompetitor}
               onToggleStatus={handleToggleCompetitorStatus}
               onStopAllCompetitors={handleStopAllCompetitors}

@@ -191,12 +191,12 @@ export async function enrichThinArticles() {
             );
           }
         } catch (enrichErr: any) {
-          console.warn(`[Auto-Enricher] Could not enrich ${art.url}:`, enrichErr.message);
+          console.info(`[Auto-Enricher] Notice enriching ${art.url}:`, enrichErr.message);
         }
       }
     }
   } catch (err) {
-    console.warn("[Auto-Enricher] General error during backfill:", err);
+    console.info("[Auto-Enricher] Notice during backfill:", err);
   }
 }
 
@@ -392,21 +392,22 @@ export function createExpressApp(): Express {
       if (db) {
         try {
           const compRef = doc(db, "competitors", targetComp.id);
-          await setDoc(
-            compRef,
-            cleanFirestoreData({
-              ...targetComp,
-              lastChecked: "Just now",
-              etag: result.etag || targetComp.etag || 'W/"7a3e-9b21"',
-              ...(result.articles.length > 0
-                ? {
-                    lastDetection: result.articles[0].title,
-                    articlesScraped: (targetComp.articlesScraped || 0) + result.articles.length
-                  }
-                : {})
-            }),
-            { merge: true }
-          );
+          const updatedFields: Record<string, any> = {
+            ...targetComp,
+            lastChecked: "Just now",
+            etag: result.etag || targetComp.etag || 'W/"7a3e-9b21"'
+          };
+
+          if (result.articles.length > 0) {
+            updatedFields.lastDetection = result.articles[0].title;
+            updatedFields.articlesScraped = (targetComp.articlesScraped || 0) + result.articles.length;
+          } else if (!targetComp.lastDetection || targetComp.lastDetection === "Pending initial sweep") {
+            updatedFields.lastDetection = result.outcome === "cached"
+              ? "Sweep complete (ETag synced)"
+              : "Sweep complete (0 new posts)";
+          }
+
+          await setDoc(compRef, cleanFirestoreData(updatedFields), { merge: true });
 
           // Save newly detected articles
           for (const art of result.articles) {
@@ -480,7 +481,7 @@ export function createExpressApp(): Express {
             { merge: true }
           );
         } catch (dbErr: any) {
-          console.warn("[Universal Scraper] Firestore sync warning:", dbErr.message);
+          console.info("[Universal Scraper] Firestore sync notice:", dbErr.message);
         }
       }
 

@@ -57,6 +57,9 @@ export interface ExtractedArticleResult {
   charCount: number;
   domSelector: string;
   takeaways: { label: string; value: string; type: "launch" | "threat" | "metric" }[];
+  success?: boolean;
+  fetchStatus?: number;
+  error?: string;
 }
 
 export function formatReadableDateTime(d: Date): string {
@@ -270,35 +273,63 @@ export async function extractUniversalArticleContent(
   const twitterCards: Record<string, string> = {};
   const jsonLdObjects: Record<string, any>[] = [];
 
+  let fetchSuccess = false;
+  let fetchStatus = 200;
+  let fetchErrorMessage: string | undefined;
+
   try {
-    const res = await fetch(articleUrl, {
-      headers: {
-        "User-Agent": BROWSER_USER_AGENT,
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1"
-      },
-      redirect: "follow",
-      signal: AbortSignal.timeout(10000)
-    });
+    let res: Response | null = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const headers: Record<string, string> = attempt === 1 ? {
+          "User-Agent": BROWSER_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Upgrade-Insecure-Requests": "1"
+        } : {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.8"
+        };
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        res = await fetch(articleUrl, {
+          headers,
+          redirect: "follow",
+          signal: AbortSignal.timeout(8000)
+        });
+
+        fetchStatus = res.status;
+        if (res.ok) {
+          fetchSuccess = true;
+          break;
+        } else {
+          fetchErrorMessage = `HTTP ${res.status}: ${res.statusText}`;
+          if (res.status >= 500 && attempt < 2) {
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          }
+          break;
+        }
+      } catch (fErr: any) {
+        fetchErrorMessage = fErr.message || "Network error";
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 600));
+          continue;
+        }
+      }
     }
 
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    if (!fetchSuccess || !res) {
+      console.info(`[Extractor] Notice: Target ${articleUrl} returned ${fetchErrorMessage || 'unreachable'}, safely bypassing.`);
+    } else {
+      const html = await res.text();
+      const $ = cheerio.load(html);
 
-    // 0. Language Extraction
-    const htmlLang = $("html").attr("lang") || $('meta[http-equiv="content-language"]').attr("content");
-    if (htmlLang) {
-      pageLanguage = htmlLang.split(/[-_]/)[0].toLowerCase();
-    }
+      // 0. Language Extraction
+      const htmlLang = $("html").attr("lang") || $('meta[http-equiv="content-language"]').attr("content");
+      if (htmlLang) {
+        pageLanguage = htmlLang.split(/[-_]/)[0].toLowerCase();
+      }
 
     // 1. Meta / OpenGraph & Twitter Inspection
     $("meta").each((_, el) => {
@@ -776,8 +807,45 @@ export async function extractUniversalArticleContent(
     if (inlineImages.length === 0 && featuredImage) {
       inlineImages.push(featuredImage);
     }
+    }
   } catch (err: any) {
-    console.warn(`[Extractor] Warning scraping ${articleUrl}:`, err.message);
+    console.info(`[Extractor] Notice during extraction for ${articleUrl}:`, err.message);
+  }
+
+  // If fetch failed completely and no fallback title was provided (e.g. from RSS)
+  if (!fetchSuccess && (!title || !title.trim())) {
+    return {
+      title: "",
+      snippet: "",
+      content: "",
+      contentMarkdown: "",
+      contentHtml: "",
+      author: normalizeAuthor(author, "Staff Editorial Team"),
+      readTime: "1 min read",
+      publishedAt,
+      canonicalUrl,
+      originalSourceUrl,
+      inlineImages: [],
+      mediaCaptures: [],
+      categories: ["Industry Intelligence"],
+      tags: [],
+      outgoingLinks: [],
+      citations: [],
+      structuredMetadata: {
+        lang: pageLanguage,
+        wordCount: 0,
+        charCount: 0,
+        readTime: "1 min read",
+        extractedAt: new Date().toISOString()
+      },
+      wordCount: 0,
+      charCount: 0,
+      domSelector: "",
+      takeaways: [],
+      success: false,
+      fetchStatus,
+      error: fetchErrorMessage
+    };
   }
 
   // 7. Sanitization & Fallback Safety
@@ -871,6 +939,8 @@ export async function extractUniversalArticleContent(
     wordCount: words,
     charCount,
     domSelector,
-    takeaways
+    takeaways,
+    success: true,
+    fetchStatus
   };
 }

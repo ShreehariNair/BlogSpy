@@ -228,17 +228,6 @@ export class CanonicalDeduplicationEngine {
       }
     }
 
-    // Check in-flight lock to prevent concurrent race conditions
-    const inFlightKey = normCanonicalUrl || normSourceUrl;
-    if (inFlightKey && this.inFlightLocks.has(inFlightKey)) {
-      this.recordSuppression(candidate.title, candidate.competitorDomain, "source_url");
-      return {
-        isDuplicate: true,
-        matchedBy: "source_url",
-        matchedKey: inFlightKey
-      };
-    }
-
     return { isDuplicate: false };
   }
 

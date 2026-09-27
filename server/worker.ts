@@ -465,28 +465,29 @@ export class ContinuousMonitoringWorker {
           if (db) {
             try {
               const compRef = doc(db, "competitors", target.id);
-              await setDoc(
-                compRef,
-                cleanFirestoreData({
-                  ...target,
-                  lastChecked: "Just now",
-                  etag: result.etag || target.etag || 'W/"7a3e-9b21"',
-                  ...(result.articles.length > 0
-                    ? {
-                        lastDetection: result.articles[0].title,
-                        articlesScraped: (target.articlesScraped || 0) + result.articles.length
-                      }
-                    : {})
-                }),
-                { merge: true }
-              );
+              const updatedFields: Record<string, any> = {
+                ...target,
+                lastChecked: "Just now",
+                etag: result.etag || target.etag || 'W/"7a3e-9b21"'
+              };
+
+              if (result.articles.length > 0) {
+                updatedFields.lastDetection = result.articles[0].title;
+                updatedFields.articlesScraped = (target.articlesScraped || 0) + result.articles.length;
+              } else if (!target.lastDetection || target.lastDetection === "Pending initial sweep") {
+                updatedFields.lastDetection = result.outcome === "cached"
+                  ? "Sweep complete (ETag synced)"
+                  : "Sweep complete (0 new posts)";
+              }
+
+              await setDoc(compRef, cleanFirestoreData(updatedFields), { merge: true });
             } catch (uErr: any) {
               // Silently protect loop uptime if network drops during competitor update
             }
           }
         } catch (targetErr: any) {
           // Absolute safety boundary: a crash on one target MUST NEVER affect other targets or the worker loop
-          console.warn(`[Continuous Worker] Target isolation boundary caught error on ${target.name}:`, targetErr.message);
+          console.info(`[Continuous Worker] Target isolation boundary caught error on ${target.name}:`, targetErr.message);
           this.consecutiveErrors++;
         }
       });

@@ -45,6 +45,8 @@ import {
   ReferenceLine 
 } from 'recharts';
 import { Article, Competitor, MonitoringCheck, TelemetryLog, ThreatRating } from '../types';
+import { Pagination } from './common/Pagination';
+import { sortArticlesDescending, sortArticlesAscending } from '../utils/articleSort';
 
 interface DashboardViewProps {
   articles: Article[];
@@ -98,6 +100,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [breachTab, setBreachTab] = useState<'breaches' | 'backlog'>('breaches');
   const [ingestFilter, setIngestFilter] = useState<'all' | 'live' | 'backlog'>('all');
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'competitors_health' | 'live_feed'>('overview');
+
+  // Pagination & Sorting state
+  const [articleSort, setArticleSort] = useState<'latest' | 'oldest' | 'delay_fastest' | 'delay_slowest' | 'threat'>('latest');
+  const [articlePage, setArticlePage] = useState(1);
+  const [articlePageSize, setArticlePageSize] = useState(10);
+
+  const [notifPage, setNotifPage] = useState(1);
+  const [notifPageSize, setNotifPageSize] = useState(5);
+
+  const [compPage, setCompPage] = useState(1);
+  const [compPageSize, setCompPageSize] = useState(6);
+
+  // Auto-reset page numbers on filter changes
+  useEffect(() => {
+    setArticlePage(1);
+  }, [searchQuery, ingestFilter, sourceFilter, articleSort]);
+
+  useEffect(() => {
+    setNotifPage(1);
+  }, [notificationFilter]);
+
+  useEffect(() => {
+    setCompPage(1);
+  }, [competitorStatusFilter, competitorSearch]);
   
   // Controlled Demo Web Sources & Testing Modal State
   const [showControlledDemoModal, setShowControlledDemoModal] = useState(false);
@@ -201,9 +227,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
   }, [competitors, competitorStatusFilter, competitorSearch]);
 
-  // Section 9.2: Real-Time Notification Feed Filtered Items
-  const notificationFeedArticles = useMemo(() => {
-    return articles.filter(art => {
+  // Section 9.2: Real-Time Notification Feed Filtered Items (Always sorted newest first)
+  const sortedNotificationArticles = useMemo(() => {
+    const filtered = articles.filter(art => {
       if (notificationFilter === 'high_threat') {
         return art.threatRating === 'High' || art.analysis?.threatRating === 'High';
       }
@@ -215,7 +241,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }
       return true;
     });
+    return sortArticlesDescending(filtered);
   }, [articles, notificationFilter]);
+
+  const paginatedNotificationArticles = useMemo(() => {
+    if (notifPageSize >= 999999) return sortedNotificationArticles;
+    const start = (notifPage - 1) * notifPageSize;
+    return sortedNotificationArticles.slice(start, start + notifPageSize);
+  }, [sortedNotificationArticles, notifPage, notifPageSize]);
 
   // General Filtered Articles
   const filteredArticles = useMemo(() => {
@@ -238,7 +271,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
   }, [articles, searchQuery, ingestFilter, sourceFilter]);
 
-  const displayedArticles = filteredArticles.slice(0, 10);
+  // Sorted Articles (defaults to latest ones on top)
+  const sortedArticles = useMemo(() => {
+    const list = [...filteredArticles];
+    if (articleSort === 'latest') {
+      return sortArticlesDescending(list);
+    } else if (articleSort === 'oldest') {
+      return sortArticlesAscending(list);
+    } else if (articleSort === 'delay_fastest') {
+      return list.sort((a, b) => a.delaySec - b.delaySec);
+    } else if (articleSort === 'delay_slowest') {
+      return list.sort((a, b) => b.delaySec - a.delaySec);
+    } else if (articleSort === 'threat') {
+      const weight: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+      return list.sort((a, b) => {
+        const wa = weight[a.threatRating || a.analysis?.threatRating || 'Low'] || 1;
+        const wb = weight[b.threatRating || b.analysis?.threatRating || 'Low'] || 1;
+        return wb - wa;
+      });
+    }
+    return sortArticlesDescending(list);
+  }, [filteredArticles, articleSort]);
+
+  // Paginated articles for the active view
+  const paginatedArticles = useMemo(() => {
+    if (articlePageSize >= 999999) return sortedArticles;
+    const start = (articlePage - 1) * articlePageSize;
+    return sortedArticles.slice(start, start + articlePageSize);
+  }, [sortedArticles, articlePage, articlePageSize]);
+
+  // Paginated competitors for Section 9.1
+  const paginatedCompetitors = useMemo(() => {
+    if (compPageSize >= 999999) return filteredCompetitors;
+    const start = (compPage - 1) * compPageSize;
+    return filteredCompetitors.slice(start, start + compPageSize);
+  }, [filteredCompetitors, compPage, compPageSize]);
 
   const formatLatencyTick = (val: number) => {
     if (val === 0) return '0m';
@@ -729,76 +796,90 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {filteredCompetitors.map((comp) => {
-                const isActive = comp.status === 'Active';
-                const strategy = comp.strategy || 'Hybrid RSS+Sitemap';
-                const articlesCountForComp = articles.filter(a => a.competitor === comp.name || a.competitorDomain === comp.domain).length;
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {paginatedCompetitors.map((comp) => {
+                  const isActive = comp.status === 'Active';
+                  const strategy = comp.strategy || 'Hybrid RSS+Sitemap';
+                  const articlesCountForComp = articles.filter(a => a.competitor === comp.name || a.competitorDomain === comp.domain).length;
 
-                return (
-                  <div
-                    key={comp.id}
-                    className="p-3.5 rounded-xl bg-slate-50/70 hover:bg-slate-50 border border-slate-200 hover:border-indigo-200 transition-all space-y-2.5 shadow-2xs"
-                  >
-                    {/* Header: Name, Domain & Online/Offline Status */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h4 className="text-xs font-bold text-slate-900 leading-snug truncate max-w-[200px]">
-                          {comp.name}
-                        </h4>
-                        <span className="text-[11px] text-slate-500 font-telemetry-mono block truncate">
-                          {comp.domain}
-                        </span>
-                      </div>
+                  return (
+                    <div
+                      key={comp.id}
+                      className="p-3.5 rounded-xl bg-slate-50/70 hover:bg-slate-50 border border-slate-200 hover:border-indigo-200 transition-all space-y-2.5 shadow-2xs"
+                    >
+                      {/* Header: Name, Domain & Online/Offline Status */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900 leading-snug truncate max-w-[200px]">
+                            {comp.name}
+                          </h4>
+                          <span className="text-[11px] text-slate-500 font-telemetry-mono block truncate">
+                            {comp.domain}
+                          </span>
+                        </div>
 
-                      {/* Online/Offline Status Badge */}
-                      <span
-                        className={`inline-flex items-center space-x-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full font-telemetry-mono ${
-                          isActive
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : 'bg-slate-100 text-slate-600 border border-slate-200'
-                        }`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                        <span>{isActive ? 'Online / Active' : 'Paused / Offline'}</span>
-                      </span>
-                    </div>
-
-                    {/* Strategy and Cadence Strip */}
-                    <div className="space-y-1 text-[11px] font-telemetry-mono bg-white p-2 rounded-lg border border-slate-100">
-                      <div className="flex items-center justify-between text-slate-600">
-                        <span className="text-slate-400">Strategy:</span>
-                        <span className="font-semibold text-indigo-700">{strategy}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-600">
-                        <span className="text-slate-400">Last Checked:</span>
-                        <span className="font-medium text-slate-800">{comp.lastChecked || 'Just now'}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-600">
-                        <span className="text-slate-400">Captured Articles:</span>
-                        <span className="font-bold text-slate-900">{articlesCountForComp || comp.articlesScraped || 0}</span>
-                      </div>
-                    </div>
-
-                    {/* Quick Probe Action */}
-                    {onForceCrawl && (
-                      <div className="flex items-center justify-between pt-1 text-[11px]">
-                        <span className="text-[10px] text-emerald-700 font-semibold font-telemetry-mono">
-                          {comp.healthScore || 100}% Health Score
-                        </span>
-                        <button
-                          onClick={() => onForceCrawl(comp)}
-                          disabled={isScanning}
-                          className="flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-semibold hover:underline cursor-pointer disabled:opacity-50"
+                        {/* Online/Offline Status Badge */}
+                        <span
+                          className={`inline-flex items-center space-x-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full font-telemetry-mono ${
+                            isActive
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          }`}
                         >
-                          <RefreshCw className={`w-3 h-3 ${isScanning ? 'animate-spin' : ''}`} />
-                          <span>Probe Now</span>
-                        </button>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                          <span>{isActive ? 'Online / Active' : 'Paused / Offline'}</span>
+                        </span>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+
+                      {/* Strategy and Cadence Strip */}
+                      <div className="space-y-1 text-[11px] font-telemetry-mono bg-white p-2 rounded-lg border border-slate-100">
+                        <div className="flex items-center justify-between text-slate-600">
+                          <span className="text-slate-400">Strategy:</span>
+                          <span className="font-semibold text-indigo-700">{strategy}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-600">
+                          <span className="text-slate-400">Last Checked:</span>
+                          <span className="font-medium text-slate-800">{comp.lastChecked || 'Just now'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-600">
+                          <span className="text-slate-400">Captured Articles:</span>
+                          <span className="font-bold text-slate-900">{articlesCountForComp || comp.articlesScraped || 0}</span>
+                        </div>
+                      </div>
+
+                      {/* Quick Probe Action */}
+                      {onForceCrawl && (
+                        <div className="flex items-center justify-between pt-1 text-[11px]">
+                          <span className="text-[10px] text-emerald-700 font-semibold font-telemetry-mono">
+                            {comp.healthScore || 100}% Health Score
+                          </span>
+                          <button
+                            onClick={() => onForceCrawl(comp)}
+                            disabled={isScanning}
+                            className="flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-semibold hover:underline cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isScanning ? 'animate-spin' : ''}`} />
+                            <span>Probe Now</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {filteredCompetitors.length > 0 && (
+                <Pagination
+                  currentPage={compPage}
+                  totalItems={filteredCompetitors.length}
+                  pageSize={compPageSize}
+                  onPageChange={setCompPage}
+                  onPageSizeChange={setCompPageSize}
+                  pageSizeOptions={[3, 6, 12, 'all']}
+                  itemName="competitors"
+                />
+              )}
             </div>
           )}
         </div>
@@ -875,15 +956,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* Live Notification Cards List */}
-          <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
-            {notificationFeedArticles.length === 0 ? (
+          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+            {sortedNotificationArticles.length === 0 ? (
               <div className="p-8 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-2">
                 <Bell className="w-6 h-6 text-slate-300 mx-auto" />
                 <p className="text-xs font-semibold text-slate-700">No New Alerts Matching Filter</p>
                 <p className="text-[11px] text-slate-400">Live alerts will appear automatically when crawler sweeps or simulation triggers detect new competitor posts.</p>
               </div>
             ) : (
-              notificationFeedArticles.slice(0, 8).map((art, idx) => {
+              paginatedNotificationArticles.map((art, idx) => {
                 const isSlaMet = !art.isBackCatalog && art.delaySec <= 300;
                 const threatRating = art.threatRating || art.analysis?.threatRating || 'Low';
 
@@ -978,6 +1059,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               })
             )}
           </div>
+
+          {sortedNotificationArticles.length > 0 && (
+            <Pagination
+              currentPage={notifPage}
+              totalItems={sortedNotificationArticles.length}
+              pageSize={notifPageSize}
+              onPageChange={setNotifPage}
+              onPageSizeChange={setNotifPageSize}
+              pageSizeOptions={[5, 10, 20, 'all']}
+              itemName="notification alerts"
+            />
+          )}
         </div>
       )}
 

@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import getDb from '../lib/firebase';
 import { Article, Competitor, TelemetryLog, MonitoringCheck, RetryEvent } from '../types';
+import { sortArticlesDescending } from '../utils/articleSort';
 
 const ARTICLES_COL = 'articles';
 const COMPETITORS_COL = 'competitors';
@@ -197,7 +198,7 @@ export function subscribeToArticles(
               rawPayload: typeof data.rawPayload === 'object' && data.rawPayload !== null ? data.rawPayload : undefined
             });
           });
-          onData(articles);
+          onData(sortArticlesDescending(articles));
         },
         (error) => {
           console.warn('Firestore articles subscription notice:', error.message);

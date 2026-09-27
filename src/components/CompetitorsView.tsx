@@ -25,10 +25,12 @@ import {
   ShieldCheck,
   X
 } from 'lucide-react';
-import { Competitor, ProbeResult, IngestionStrategy } from '../types';
+import { Competitor, ProbeResult, IngestionStrategy, Article } from '../types';
+import { Pagination } from './common/Pagination';
 
 interface CompetitorsViewProps {
   competitors: Competitor[];
+  articles?: Article[];
   onAddCompetitor: (competitor: Competitor) => void;
   onToggleStatus: (id: string) => void;
   onStopAllCompetitors: () => void;
@@ -40,6 +42,7 @@ interface CompetitorsViewProps {
 
 export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
   competitors,
+  articles = [],
   onAddCompetitor,
   onToggleStatus,
   onStopAllCompetitors,
@@ -52,10 +55,16 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
   const [showAddForm, setShowAddForm] = useState(true);
 
-  // Pagination states
+  // Pagination & Sorting states
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number | 'all'>(5);
+  const [pageSize, setPageSize] = useState<number>(5);
+  const [competitorSort, setCompetitorSort] = useState<'articles_desc' | 'name_asc' | 'health_desc' | 'status'>('articles_desc');
   const [openMenuCompId, setOpenMenuCompId] = useState<string | null>(null);
+
+  // Auto-reset page on search/filter/sort change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, strategyFilter, competitorSort]);
 
   // Form states
   const [brandName, setBrandName] = useState('');
@@ -173,28 +182,46 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
     }, 1200);
   };
 
-  const filteredCompetitors = competitors.filter((comp) => {
-    const matchesSearch = 
-      comp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      comp.domain.toLowerCase().includes(searchQuery.toLowerCase());
-    if (!matchesSearch) return false;
+  const filteredCompetitors = useMemo(() => {
+    return competitors.filter((comp) => {
+      const matchesSearch = 
+        comp.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        comp.domain.toLowerCase().includes(searchQuery.toLowerCase());
+      if (!matchesSearch) return false;
 
-    if (strategyFilter === 'hybrid') return comp.strategy === 'Hybrid RSS+Sitemap';
-    if (strategyFilter === 'sitemap') return comp.strategy === 'Sitemap Index';
-    if (strategyFilter === 'dom') return comp.strategy === 'Direct DOM Poller';
-    if (strategyFilter === 'rss') return comp.strategy === 'RSS Stream';
-    return true;
-  });
+      if (strategyFilter === 'hybrid') return comp.strategy === 'Hybrid RSS+Sitemap';
+      if (strategyFilter === 'sitemap') return comp.strategy === 'Sitemap Index';
+      if (strategyFilter === 'dom') return comp.strategy === 'Direct DOM Poller';
+      if (strategyFilter === 'rss') return comp.strategy === 'RSS Stream';
+      return true;
+    });
+  }, [competitors, searchQuery, strategyFilter]);
 
-  const totalItems = filteredCompetitors.length;
-  const totalPages = pageSize === 'all' ? 1 : Math.max(1, Math.ceil(totalItems / pageSize));
-  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-  const paginatedCompetitors = pageSize === 'all' 
-    ? filteredCompetitors 
-    : filteredCompetitors.slice((validCurrentPage - 1) * pageSize, validCurrentPage * pageSize);
+  const sortedCompetitors = useMemo(() => {
+    const list = [...filteredCompetitors];
+    if (competitorSort === 'articles_desc') {
+      return list.sort((a, b) => {
+        const countA = articles.filter(art => (art.competitor && art.competitor.toLowerCase().trim() === a.name.toLowerCase().trim()) || (art.competitorDomain && a.domain && art.competitorDomain.includes(a.domain))).length;
+        const countB = articles.filter(art => (art.competitor && art.competitor.toLowerCase().trim() === b.name.toLowerCase().trim()) || (art.competitorDomain && b.domain && art.competitorDomain.includes(b.domain))).length;
+        const totalA = Math.max(countA, a.articlesScraped || 0);
+        const totalB = Math.max(countB, b.articlesScraped || 0);
+        return totalB - totalA;
+      });
+    } else if (competitorSort === 'name_asc') {
+      return list.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (competitorSort === 'health_desc') {
+      return list.sort((a, b) => (b.healthScore || 100) - (a.healthScore || 100));
+    } else if (competitorSort === 'status') {
+      return list.sort((a, b) => (a.status === 'Active' ? -1 : 1) - (b.status === 'Active' ? -1 : 1));
+    }
+    return list;
+  }, [filteredCompetitors, competitorSort, articles]);
 
-  const startRange = totalItems === 0 ? 0 : (validCurrentPage - 1) * (typeof pageSize === 'number' ? pageSize : totalItems) + 1;
-  const endRange = pageSize === 'all' ? totalItems : Math.min(validCurrentPage * (pageSize as number), totalItems);
+  const paginatedCompetitors = useMemo(() => {
+    if (pageSize >= 999999) return sortedCompetitors;
+    const start = (currentPage - 1) * pageSize;
+    return sortedCompetitors.slice(start, start + pageSize);
+  }, [sortedCompetitors, currentPage, pageSize]);
 
   const liveScrapersCount = competitors.filter(c => c.status === 'Active').length;
 
@@ -462,25 +489,11 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto">
-            {/* Dynamic Stop / Start All Scrapers Button */}
-            {liveScrapersCount > 0 ? (
-              <button
-                id="stop-all-scrapers-btn"
-                onClick={onStopAllCompetitors}
-                disabled={isScanning}
-                className="w-full sm:w-auto bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-800 border border-amber-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-60"
-                title="Pause background polling for all active scrapers"
-              >
-                <Pause className="w-3.5 h-3.5 text-amber-700" />
-                <span>Stop All Scrapers</span>
-                <span className="ml-1 px-1.5 py-0.5 bg-amber-200/70 rounded-full text-[10px] font-telemetry-mono font-medium">
-                  {liveScrapersCount} live
-                </span>
-              </button>
-            ) : (
+            {/* Start All / Resume All Scrapers Button */}
+            {competitors.length > liveScrapersCount && onStartAllCompetitors && (
               <button
                 id="start-all-scrapers-btn"
-                onClick={onStartAllCompetitors || onStopAllCompetitors}
+                onClick={onStartAllCompetitors}
                 disabled={isScanning || competitors.length === 0}
                 className="w-full sm:w-auto bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-800 border border-emerald-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-60"
                 title="Activate all competitor targets and immediately scrape all sites"
@@ -490,9 +503,23 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
                 ) : (
                   <Play className="w-3.5 h-3.5 text-emerald-700 fill-emerald-700" />
                 )}
-                <span>{isScanning ? 'Scraping All Sites...' : 'Start All Scrapers & Scrape Sites'}</span>
-                <span className="ml-1 px-1.5 py-0.5 bg-emerald-200/70 rounded-full text-[10px] font-telemetry-mono font-medium">
-                  {competitors.length} sites
+                <span>{isScanning ? 'Scraping All Sites...' : `Start All & Sweep (${competitors.length})`}</span>
+              </button>
+            )}
+
+            {/* Stop All Scrapers Button */}
+            {liveScrapersCount > 0 && (
+              <button
+                id="stop-all-scrapers-btn"
+                onClick={onStopAllCompetitors}
+                disabled={isScanning}
+                className="w-full sm:w-auto bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-800 border border-amber-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                title="Pause background polling for all active scrapers"
+              >
+                <Pause className="w-3.5 h-3.5 text-amber-700" />
+                <span>Stop All</span>
+                <span className="ml-1 px-1.5 py-0.5 bg-amber-200/70 rounded-full text-[10px] font-telemetry-mono font-medium">
+                  {liveScrapersCount} live
                 </span>
               </button>
             )}
@@ -520,6 +547,18 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
               <option value="sitemap">Sitemap Index</option>
               <option value="dom">Direct DOM Poller</option>
               <option value="rss">RSS Stream</option>
+            </select>
+
+            {/* Sort Selector */}
+            <select
+              value={competitorSort}
+              onChange={(e) => setCompetitorSort(e.target.value as any)}
+              className="w-full sm:w-auto bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-indigo-500 shadow-2xs font-telemetry-mono"
+            >
+              <option value="articles_desc">Sort: Most Articles First</option>
+              <option value="name_asc">Sort: Name (A to Z)</option>
+              <option value="health_desc">Sort: Highest Health Score</option>
+              <option value="status">Sort: Active Targets First</option>
             </select>
           </div>
         </div>
@@ -610,24 +649,53 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
 
                     {/* Last Detection (Truncated with max-width) */}
                     <td className="py-2.5 px-3">
-                      <div className="truncate max-w-[200px] text-slate-700 font-telemetry-mono text-[11px]" title={comp.lastDetection}>
-                        {comp.lastDetection}
-                      </div>
+                      {comp.lastDetection === 'Pending initial sweep' ? (
+                        <div className="flex items-center space-x-1.5 text-[11px] font-telemetry-mono">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded border text-[10px] font-medium ${
+                            isActive
+                              ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse'
+                              : 'bg-slate-100 text-slate-500 border-slate-200'
+                          }`}>
+                            <Clock className="w-2.5 h-2.5 mr-1" />
+                            {isActive ? 'Initial sweep queued' : 'Paused (sweep pending)'}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="truncate max-w-[200px] text-slate-700 font-telemetry-mono text-[11px]" title={comp.lastDetection}>
+                          {comp.lastDetection}
+                        </div>
+                      )}
                     </td>
 
                     {/* Articles Scraped */}
                     <td className="py-2.5 px-3 font-semibold text-indigo-700 font-mono-tech">
-                      {comp.articlesScraped.toLocaleString()}
+                      {(() => {
+                        const liveCount = articles.filter(a => 
+                          (a.competitor && comp.name && a.competitor.toLowerCase().trim() === comp.name.toLowerCase().trim()) ||
+                          (a.competitorDomain && comp.domain && (a.competitorDomain.includes(comp.domain) || comp.domain.includes(a.competitorDomain)))
+                        ).length;
+                        return Math.max(liveCount, comp.articlesScraped || 0).toLocaleString();
+                      })()}
                     </td>
 
-                    {/* Compact Actions: Direct Play/Pause Toggle + More Options (...) Dropdown */}
+                    {/* Compact Actions: Direct Play/Pause Toggle + Force Sweep + More Options (...) Dropdown */}
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex items-center justify-end space-x-1 relative">
+                        {/* Instant Single-Target Sweep / Probe Button */}
+                        <button
+                          title="Run immediate sweep on this competitor"
+                          onClick={() => handleTriggerCrawlRow(comp)}
+                          disabled={isThisCrawling}
+                          className="p-1.5 rounded-lg border bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-700 transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isThisCrawling ? 'animate-spin text-indigo-600' : ''}`} />
+                        </button>
+
                         {/* Pause / Resume Button */}
                         <button
                           title={isActive ? 'Pause monitoring' : 'Resume monitoring'}
                           onClick={() => onToggleStatus(comp.id)}
-                          className={`p-1.5 rounded-lg border transition-colors ${
+                          className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
                             isActive 
                               ? 'bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700' 
                               : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
@@ -703,62 +771,17 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
           </table>
         </div>
 
-        {/* Competitor Matrix Pagination & Page Size Toolbar */}
-        {totalItems > 0 && (
-          <div className="pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <div className="flex items-center space-x-3 text-slate-500 font-telemetry-mono">
-              <span>
-                Showing {startRange}–{endRange} of {totalItems} Competitors
-              </span>
-              <span className="text-slate-300">|</span>
-              <div className="flex items-center space-x-1.5">
-                <span>Per Page:</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setPageSize(val === 'all' ? 'all' : Number(val));
-                    setCurrentPage(1);
-                  }}
-                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-700 font-telemetry-mono focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value="all">All</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="flex items-center space-x-1.5">
-                <button
-                  id="comp-page-prev-btn"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={validCurrentPage <= 1}
-                  className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>Prev</span>
-                </button>
-
-                <div className="px-2.5 py-1 text-slate-600 font-telemetry-mono font-semibold">
-                  Page {validCurrentPage} of {totalPages}
-                </div>
-
-                <button
-                  id="comp-page-next-btn"
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={validCurrentPage >= totalPages}
-                  className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <span>Next</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
+        {/* Competitor Matrix Pagination */}
+        {sortedCompetitors.length > 0 && (
+          <Pagination
+            currentPage={currentPage}
+            totalItems={sortedCompetitors.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[5, 10, 20, 50, 'all']}
+            itemName="competitors"
+          />
         )}
       </div>
 

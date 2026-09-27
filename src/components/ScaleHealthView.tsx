@@ -35,7 +35,8 @@ import {
   ZapOff,
   Flame,
   Check,
-  Copy
+  Copy,
+  Globe
 } from 'lucide-react';
 import { 
   SiteNode, 
@@ -49,6 +50,7 @@ import {
   ScaleBenchmarkResult 
 } from '../types';
 import { INITIAL_100_NODES, INITIAL_RETRIES, INITIAL_MONITORING_CHECKS } from '../data/mockData';
+import { Pagination } from './common/Pagination';
 
 interface ScaleHealthViewProps {
   nodes?: SiteNode[];
@@ -92,7 +94,7 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
 
   // Benchmark Runner state
   const [isBenchmarking, setIsBenchmarking] = useState(false);
-  const [benchmarkScenario, setBenchmarkScenario] = useState<'nominal' | 'slow_timeouts' | 'rate_limits' | 'syndication_storm'>('nominal');
+  const [benchmarkScenario, setBenchmarkScenario] = useState<'nominal' | 'slow_timeouts' | 'rate_limits' | 'syndication_storm' | 'real_web_scrape'>('nominal');
   const [benchmarkProgress, setBenchmarkProgress] = useState<{ completed: number; total: number } | null>(null);
   const [lastBenchmarkResult, setLastBenchmarkResult] = useState<ScaleBenchmarkResult | null>(null);
 
@@ -195,6 +197,13 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
   // Audit filter state
   const [auditFilter, setAuditFilter] = useState<'all' | 'success' | 'cached' | 'error'>('all');
   const [auditSearch, setAuditSearch] = useState<string>('');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize, setAuditPageSize] = useState(10);
+
+  // Auto-reset auditPage on search or filter change
+  useEffect(() => {
+    setAuditPage(1);
+  }, [auditFilter, auditSearch]);
 
   // Fetch live stats from server
   const fetchServerStats = async () => {
@@ -249,11 +258,12 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
   };
 
   // Run 100-Website Scale Benchmark
-  const handleRunBenchmark = async (scenario: 'nominal' | 'slow_timeouts' | 'rate_limits' | 'syndication_storm') => {
+  const handleRunBenchmark = async (scenario: 'nominal' | 'slow_timeouts' | 'rate_limits' | 'syndication_storm' | 'real_web_scrape') => {
     setIsBenchmarking(true);
     setBenchmarkScenario(scenario);
     setBenchmarkProgress({ completed: 0, total: 100 });
-    setSimFeedback(`Launching 100-Website Scale Benchmark [Scenario: ${scenario.toUpperCase()}] across ${concurrencyLimit} concurrent async sockets...`);
+    const scenarioTitle = scenario === 'real_web_scrape' ? 'REAL 100-BLOG PUBLIC WEB CRAWL' : scenario.toUpperCase();
+    setSimFeedback(`Launching 100-Website Scale Benchmark [Scenario: ${scenarioTitle}] across ${concurrencyLimit} concurrent async sockets...`);
 
     // Animate 100 nodes dynamically through Queued -> Polling -> Completed
     const nodesCopy = [...siteNodes];
@@ -430,6 +440,12 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
     return true;
   });
 
+  const paginatedChecks = useMemo(() => {
+    if (auditPageSize >= 999999) return filteredChecks;
+    const start = (auditPage - 1) * auditPageSize;
+    return filteredChecks.slice(start, start + auditPageSize);
+  }, [filteredChecks, auditPage, auditPageSize]);
+
   const handleCopyHash = (hash: string) => {
     navigator.clipboard?.writeText(hash);
     setCopiedHash(hash);
@@ -490,6 +506,21 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
             ))}
           </div>
 
+          {/* Scrape 100 Real Blog Pages Button */}
+          <button
+            id="scrape-100-real-blogs-btn"
+            disabled={isBenchmarking}
+            onClick={() => {
+              setBenchmarkScenario('real_web_scrape');
+              handleRunBenchmark('real_web_scrape');
+            }}
+            className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold shadow-sm shadow-emerald-600/25 transition-all cursor-pointer disabled:opacity-50"
+            title="Scrape 100 Real Engineering Blogs over the live public internet"
+          >
+            <Globe className={`w-4 h-4 ${isBenchmarking && benchmarkScenario === 'real_web_scrape' ? 'animate-spin' : ''}`} />
+            <span>{isBenchmarking && benchmarkScenario === 'real_web_scrape' ? 'Scraping 100 Real Blogs...' : 'Scrape 100 Real Blog Pages'}</span>
+          </button>
+
           {/* Run 100-Site Benchmark Button */}
           <button
             id="run-100-scale-benchmark-btn"
@@ -497,8 +528,8 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
             onClick={() => handleRunBenchmark(benchmarkScenario)}
             className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-bold shadow-sm shadow-indigo-600/25 transition-all cursor-pointer disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${isBenchmarking ? 'animate-spin' : ''}`} />
-            <span>{isBenchmarking ? 'Benchmarking 100 Sites...' : 'Run 100-Site Scale Test'}</span>
+            <RefreshCw className={`w-4 h-4 ${isBenchmarking && benchmarkScenario !== 'real_web_scrape' ? 'animate-spin' : ''}`} />
+            <span>{isBenchmarking && benchmarkScenario !== 'real_web_scrape' ? 'Benchmarking 100 Sites...' : 'Run 100-Site Scale Test'}</span>
           </button>
         </div>
       </div>
@@ -707,6 +738,7 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
               disabled={isBenchmarking}
               className="bg-slate-800 border border-slate-700 text-indigo-200 rounded-lg px-2.5 py-1.5 text-xs font-telemetry-mono focus:outline-none focus:border-indigo-500"
             >
+              <option value="real_web_scrape">Real Web Scraping (100 Live Sites over Public Internet)</option>
               <option value="nominal">Nominal Full Scale (Sub-second / 304 Caching)</option>
               <option value="slow_timeouts">High Timeout Stress (15% 504 Network Dropouts)</option>
               <option value="rate_limits">Origin Rate Limit Stress (429 Backoff &amp; Jitter)</option>
@@ -716,7 +748,25 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
         </div>
 
         {/* Benchmark Scenario Description & Actions */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+          <button
+            onClick={() => { setBenchmarkScenario('real_web_scrape'); handleRunBenchmark('real_web_scrape'); }}
+            disabled={isBenchmarking}
+            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
+              benchmarkScenario === 'real_web_scrape'
+                ? 'bg-emerald-950/70 border-emerald-500 shadow-sm ring-1 ring-emerald-500/40'
+                : 'bg-slate-800/80 border-slate-700/80 hover:border-emerald-500'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="font-bold text-emerald-400 font-mono-tech">★ Real Web Scrape</span>
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <p className="text-[11px] text-slate-300">
+              Dispatches parallel live HTTP requests across 100 real tech blogs (TechCrunch, GitHub, AWS, etc.) measuring live network roundtrip and extracting articles.
+            </p>
+          </button>
+
           <button
             onClick={() => { setBenchmarkScenario('nominal'); handleRunBenchmark('nominal'); }}
             disabled={isBenchmarking}
@@ -727,8 +777,8 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
             }`}
           >
             <div className="flex items-center justify-between mb-1">
-              <span className="font-bold text-emerald-400 font-mono-tech">1. Nominal Scale</span>
-              <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="font-bold text-indigo-300 font-mono-tech">1. Nominal Scale</span>
+              <Zap className="w-3.5 h-3.5 text-indigo-400" />
             </div>
             <p className="text-[11px] text-slate-300">
               Evaluates full 100-site throughput with 75% 304 Not Modified cache hits and sub-100ms response cycles.
@@ -1440,7 +1490,7 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-telemetry-mono text-[11px]">
-                {filteredChecks.map((chk) => (
+                {paginatedChecks.map((chk) => (
                   <tr key={chk.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{chk.timestamp}</td>
                     <td className="py-2.5 px-3">
@@ -1497,6 +1547,19 @@ export const ScaleHealthView: React.FC<ScaleHealthViewProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Audit Log Table Pagination */}
+          {filteredChecks.length > 0 && (
+            <Pagination
+              currentPage={auditPage}
+              totalItems={filteredChecks.length}
+              pageSize={auditPageSize}
+              onPageChange={setAuditPage}
+              onPageSizeChange={setAuditPageSize}
+              pageSizeOptions={[10, 25, 50, 'all']}
+              itemName="monitoring checks"
+            />
+          )}
         </div>
       )}
     </div>

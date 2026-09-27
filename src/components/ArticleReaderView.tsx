@@ -26,6 +26,8 @@ import {
   Layers
 } from 'lucide-react';
 import { Article, ThreatRating, MediaCaptureItem } from '../types';
+import { Pagination } from './common/Pagination';
+import { sortArticlesDescending, sortArticlesAscending } from '../utils/articleSort';
 
 interface ArticleReaderViewProps {
   articles?: Article[];
@@ -63,6 +65,16 @@ export const ArticleReaderView: React.FC<ArticleReaderViewProps> = ({
   const [competitorFilter, setCompetitorFilter] = useState('all');
   const [threatFilter, setThreatFilter] = useState('all');
   const [slaFilter, setSlaFilter] = useState('all');
+
+  // Sorting and Pagination state for Left Stream
+  const [readerSort, setReaderSort] = useState<'latest' | 'oldest' | 'delay_fastest' | 'delay_slowest' | 'threat'>('latest');
+  const [readerPage, setReaderPage] = useState(1);
+  const [readerPageSize, setReaderPageSize] = useState(10);
+
+  // Auto-reset page on filter or search changes
+  React.useEffect(() => {
+    setReaderPage(1);
+  }, [searchQuery, competitorFilter, threatFilter, slaFilter, readerSort]);
 
   // Mobile View state
   const [mobileActiveView, setMobileActiveView] = useState<'list' | 'detail'>('detail');
@@ -104,7 +116,36 @@ export const ArticleReaderView: React.FC<ArticleReaderViewProps> = ({
     });
   }, [articles, searchQuery, competitorFilter, threatFilter, slaFilter]);
 
-  const currentArticle = article || (filteredArticles.length > 0 ? filteredArticles[0] : null);
+  // Sorted Articles (Latest / Newest first by default)
+  const sortedArticles = useMemo(() => {
+    const list = [...filteredArticles];
+    if (readerSort === 'latest') {
+      return sortArticlesDescending(list);
+    } else if (readerSort === 'oldest') {
+      return sortArticlesAscending(list);
+    } else if (readerSort === 'delay_fastest') {
+      return list.sort((a, b) => a.delaySec - b.delaySec);
+    } else if (readerSort === 'delay_slowest') {
+      return list.sort((a, b) => b.delaySec - a.delaySec);
+    } else if (readerSort === 'threat') {
+      const weight: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+      return list.sort((a, b) => {
+        const wa = weight[a.threatRating || a.analysis?.threatRating || 'Low'] || 1;
+        const wb = weight[b.threatRating || b.analysis?.threatRating || 'Low'] || 1;
+        return wb - wa;
+      });
+    }
+    return sortArticlesDescending(list);
+  }, [filteredArticles, readerSort]);
+
+  // Paginated articles for the stream
+  const paginatedArticles = useMemo(() => {
+    if (readerPageSize >= 999999) return sortedArticles;
+    const start = (readerPage - 1) * readerPageSize;
+    return sortedArticles.slice(start, start + readerPageSize);
+  }, [sortedArticles, readerPage, readerPageSize]);
+
+  const currentArticle = article || (sortedArticles.length > 0 ? sortedArticles[0] : null);
 
   const isSlaMet = currentArticle ? currentArticle.delaySec <= 300 : true;
   const authorText = currentArticle
@@ -369,8 +410,8 @@ export const ArticleReaderView: React.FC<ArticleReaderViewProps> = ({
               )}
             </div>
 
-            {/* Filter Dropdowns Strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+            {/* Filter & Sort Dropdowns Strip */}
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
               <select
                 value={competitorFilter}
                 onChange={(e) => setCompetitorFilter(e.target.value)}
@@ -396,24 +437,36 @@ export const ArticleReaderView: React.FC<ArticleReaderViewProps> = ({
               <select
                 value={slaFilter}
                 onChange={(e) => setSlaFilter(e.target.value)}
-                className="col-span-2 sm:col-span-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-700 font-telemetry-mono focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-700 font-telemetry-mono focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
               >
                 <option value="all">All SLA</option>
                 <option value="met">SLA Met (≤5m)</option>
                 <option value="breached">SLA Breached (&gt;5m)</option>
               </select>
+
+              <select
+                value={readerSort}
+                onChange={(e) => setReaderSort(e.target.value as any)}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-700 font-semibold font-telemetry-mono focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="latest">Latest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="delay_fastest">Fastest SLA</option>
+                <option value="delay_slowest">Slowest Delay</option>
+                <option value="threat">High Threat</option>
+              </select>
             </div>
 
             {/* Articles List Scroll Container */}
-            <div className="max-h-[calc(100vh-280px)] overflow-y-auto space-y-2 pr-1 divide-y divide-slate-100">
-              {filteredArticles.length === 0 ? (
+            <div className="max-h-[calc(100vh-320px)] overflow-y-auto space-y-2 pr-1 divide-y divide-slate-100">
+              {sortedArticles.length === 0 ? (
                 <div className="py-12 text-center text-slate-500 space-y-2">
                   <BookOpen className="w-7 h-7 text-slate-300 mx-auto" />
                   <p className="text-xs font-semibold text-slate-700">No matching articles</p>
                   <p className="text-[11px] text-slate-400">Try adjusting your filters or search keywords</p>
                 </div>
               ) : (
-                filteredArticles.map((item) => {
+                paginatedArticles.map((item) => {
                   const isSelected = currentArticle?.id === item.id;
                   const itemSlaMet = item.delaySec <= 300;
                   const threatRating = item.threatRating || item.analysis?.threatRating || 'Low';
@@ -487,6 +540,22 @@ export const ArticleReaderView: React.FC<ArticleReaderViewProps> = ({
                 })
               )}
             </div>
+
+            {/* Pagination Controls */}
+            {sortedArticles.length > 0 && (
+              <div className="pt-2 border-t border-slate-100">
+                <Pagination
+                  currentPage={readerPage}
+                  totalItems={sortedArticles.length}
+                  pageSize={readerPageSize}
+                  onPageChange={setReaderPage}
+                  onPageSizeChange={setReaderPageSize}
+                  pageSizeOptions={[5, 10, 25, 'all']}
+                  itemName="articles"
+                  compact={true}
+                />
+              </div>
+            )}
           </div>
         </div>
 
