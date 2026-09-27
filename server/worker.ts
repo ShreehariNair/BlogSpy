@@ -1,4 +1,3 @@
-import { collection, doc, getDocs, setDoc, query, orderBy, limit } from "firebase/firestore";
 import { 
   checkCompetitorTarget, 
   CrawledArticle, 
@@ -8,7 +7,16 @@ import {
   formatExactDelayText
 } from "./crawler.js";
 import { sendDetectionEmail, dispatchWebhook } from "./notifier.js";
-import { getServerDb, cleanFirestoreData } from "./app.js";
+import {
+  getCompetitorsFromMongo,
+  saveCompetitorToMongo,
+  updateCompetitorInMongo,
+  saveArticleToMongo,
+  getChecksFromMongo,
+  saveCheckToMongo,
+  saveLogToMongo,
+  saveRetryToMongo
+} from "./mongo.js";
 
 export interface MonitoringCheckRecord {
   id: string;
@@ -55,115 +63,43 @@ export class ContinuousMonitoringWorker {
   private timerHandle: NodeJS.Timeout | null = null;
   private isCycleInProgress: boolean = false;
   
-  // In-memory ring buffer (up to 300 check records) for instant response and DB disconnect resiliency
+  // In-memory ring buffer (up to 300 check records) for instant response
   private recentChecks: MonitoringCheckRecord[] = [];
 
   constructor() {
     this.startedAt = new Date();
   }
 
-  // Initialize and recover historical check records from database across server restarts
+  // Initialize and recover historical check records from MongoDB database across server restarts
   public async init(): Promise<void> {
-    const db = getServerDb();
-    if (db) {
-      // 1. Ensure baseline competitors exist in Firestore so no NOT_FOUND update can ever occur
-      try {
-        const compSnap = await getDocs(collection(db, "competitors"));
-        if (compSnap.empty) {
-          const baselineTargets = [
-            {
-              id: "comp-techcrunch",
-              name: "TechCrunch",
-              domain: "techcrunch.com",
-              blogUrl: "https://techcrunch.com",
-              feedUrl: "https://techcrunch.com/feed/",
-              strategy: "Hybrid RSS+Sitemap",
-              status: "Active",
-              lastChecked: "Just now",
-              etag: 'W/"tc-init"',
-              cadence: "60s polling",
-              healthScore: 100,
-              articlesScraped: 0,
-              createdAt: new Date().toISOString()
-            },
-            {
-              id: "comp-theverge",
-              name: "The Verge",
-              domain: "theverge.com",
-              blogUrl: "https://theverge.com",
-              feedUrl: "https://theverge.com/rss/index.xml",
-              strategy: "RSS Stream",
-              status: "Active",
-              lastChecked: "Just now",
-              etag: 'W/"tv-init"',
-              cadence: "60s polling",
-              healthScore: 100,
-              articlesScraped: 0,
-              createdAt: new Date().toISOString()
-            },
-            {
-              id: "comp-venturebeat",
-              name: "VentureBeat",
-              domain: "venturebeat.com",
-              blogUrl: "https://venturebeat.com",
-              feedUrl: "https://venturebeat.com/feed/",
-              strategy: "Hybrid RSS+Sitemap",
-              status: "Active",
-              lastChecked: "Just now",
-              etag: 'W/"vb-init"',
-              cadence: "60s polling",
-              healthScore: 100,
-              articlesScraped: 0,
-              createdAt: new Date().toISOString()
-            }
-          ];
-
-          for (const target of baselineTargets) {
-            const compRef = doc(db, "competitors", target.id);
-            await setDoc(compRef, cleanFirestoreData(target), { merge: true });
-          }
-          console.log("[Continuous Worker] Seeded baseline competitor targets into Firestore.");
-        }
-      } catch (seedErr: any) {
-        console.warn("[Continuous Worker] Notice verifying baseline competitors in Firestore:", seedErr.message);
+    try {
+      const recovered = await getChecksFromMongo();
+      if (recovered && recovered.length > 0) {
+        this.recentChecks = recovered.map((d: any) => ({
+          id: d.id,
+          timestamp: d.timestamp || new Date().toLocaleTimeString(),
+          competitorId: d.competitorId || "",
+          competitorName: d.competitorName || "Target",
+          domain: d.domain || "",
+          strategy: d.strategy || "Hybrid RSS+Sitemap",
+          statusCode: typeof d.statusCode === "number" ? d.statusCode : 200,
+          statusResponse: d.statusResponse || "200 OK",
+          durationMs: typeof d.durationMs === "number" ? d.durationMs : 120,
+          outcome: d.outcome || "success",
+          articlesDetected: typeof d.articlesDetected === "number" ? d.articlesDetected : 0,
+          error: d.error,
+          recoveryAction: d.recoveryAction,
+          createdAt: d.createdAt || new Date().toISOString()
+        }));
+        this.totalChecksRecorded = recovered.length;
+        console.log(`[Continuous Worker] Recovered ${recovered.length} persistent monitoring checks from MongoDB database.`);
       }
-
-      try {
-        const q = query(collection(db, "monitoring_checks"), orderBy("createdAt", "desc"), limit(100));
-        const snap = await getDocs(q);
-        const recovered: MonitoringCheckRecord[] = [];
-        snap.forEach((docSnap) => {
-          const d = docSnap.data();
-          recovered.push({
-            id: docSnap.id,
-            timestamp: d.timestamp || new Date().toLocaleTimeString(),
-            competitorId: d.competitorId || "",
-            competitorName: d.competitorName || "Target",
-            domain: d.domain || "",
-            strategy: d.strategy || "Hybrid RSS+Sitemap",
-            statusCode: typeof d.statusCode === "number" ? d.statusCode : 200,
-            statusResponse: d.statusResponse || "200 OK",
-            durationMs: typeof d.durationMs === "number" ? d.durationMs : 120,
-            outcome: d.outcome || "success",
-            articlesDetected: typeof d.articlesDetected === "number" ? d.articlesDetected : 0,
-            error: d.error,
-            recoveryAction: d.recoveryAction,
-            createdAt: d.createdAt || new Date().toISOString()
-          });
-        });
-        
-        if (recovered.length > 0) {
-          this.recentChecks = recovered;
-          this.totalChecksRecorded = recovered.length;
-          console.log(`[Continuous Worker] Recovered ${recovered.length} persistent monitoring checks from Firestore database.`);
-        }
-      } catch (err: any) {
-        console.warn("[Continuous Worker] Notice reading historical monitoring_checks:", err.message);
-      }
+    } catch (err: any) {
+      console.warn("[Continuous Worker] Notice reading historical monitoring_checks from MongoDB:", err.message);
     }
 
-    // Start autonomous continuous monitoring loop
-    this.start();
+    // Autonomous monitoring loop remains stopped until manually started by operator
+    console.log("[Continuous Worker] Historical state loaded. Auto-start competitor checkers disabled per configuration.");
   }
 
   public start(): void {
@@ -245,12 +181,12 @@ export class ContinuousMonitoringWorker {
     }, wait);
   }
 
-  // Trigger an immediate cycle on-demand (e.g. from UI button or API)
+  // Trigger an immediate cycle on-demand
   public async triggerImmediateCycle(): Promise<{ newlyDetected: number; sitesPolled: number }> {
     return this.runCycle();
   }
 
-  // Core continuous loop execution: polls all enabled competitors without stopping
+  // Core continuous loop execution: polls all enabled competitors in MongoDB without stopping
   public async runCycle(): Promise<{ newlyDetected: number; sitesPolled: number }> {
     if (this.isCycleInProgress) {
       return { newlyDetected: 0, sitesPolled: this.activeTargetsCount };
@@ -262,93 +198,20 @@ export class ContinuousMonitoringWorker {
     let newlyDetected = 0;
     let sitesPolled = 0;
 
-    const db = getServerDb();
-
     try {
-      const activeTargets: any[] = [];
+      let activeTargets: any[] = [];
 
-      if (db) {
-        try {
-          const compSnap = await getDocs(collection(db, "competitors"));
-          compSnap.forEach((docSnap) => {
-            const comp = docSnap.data();
-            if (comp.status === "Active") {
-              activeTargets.push({ id: docSnap.id, ...comp });
-            }
-          });
-        } catch (dbErr: any) {
-          console.warn("[Continuous Worker] Could not fetch competitors from Firestore, using default targets:", dbErr.message);
-        }
-      }
-
-      // Default fallback targets if DB is empty or during first boot
-      if (activeTargets.length === 0) {
-        const fallbackList = [
-          {
-            id: "comp-techcrunch",
-            name: "TechCrunch",
-            domain: "techcrunch.com",
-            blogUrl: "https://techcrunch.com",
-            feedUrl: "https://techcrunch.com/feed/",
-            strategy: "Hybrid RSS+Sitemap",
-            status: "Active",
-            lastChecked: "Just now",
-            etag: 'W/"tc-init"',
-            cadence: "60s polling",
-            healthScore: 100,
-            articlesScraped: 0,
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: "comp-theverge",
-            name: "The Verge",
-            domain: "theverge.com",
-            blogUrl: "https://theverge.com",
-            feedUrl: "https://theverge.com/rss/index.xml",
-            strategy: "RSS Stream",
-            status: "Active",
-            lastChecked: "Just now",
-            etag: 'W/"tv-init"',
-            cadence: "60s polling",
-            healthScore: 100,
-            articlesScraped: 0,
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: "comp-venturebeat",
-            name: "VentureBeat",
-            domain: "venturebeat.com",
-            blogUrl: "https://venturebeat.com",
-            feedUrl: "https://venturebeat.com/feed/",
-            strategy: "Hybrid RSS+Sitemap",
-            status: "Active",
-            lastChecked: "Just now",
-            etag: 'W/"vb-init"',
-            cadence: "60s polling",
-            healthScore: 100,
-            articlesScraped: 0,
-            createdAt: new Date().toISOString()
-          }
-        ];
-        activeTargets.push(...fallbackList);
-
-        if (db) {
-          for (const target of fallbackList) {
-            try {
-              const compRef = doc(db, "competitors", target.id);
-              await setDoc(compRef, cleanFirestoreData(target), { merge: true });
-            } catch (sErr: any) {
-              console.warn(`[Continuous Worker] Notice creating fallback competitor ${target.id}:`, sErr.message);
-            }
-          }
-        }
+      try {
+        const mongoTargets = await getCompetitorsFromMongo();
+        activeTargets = mongoTargets.filter((comp) => comp.status === "Active");
+      } catch (dbErr: any) {
+        console.warn("[Continuous Worker] Could not fetch competitors from MongoDB:", dbErr.message);
       }
 
       this.activeTargetsCount = activeTargets.length;
       sitesPolled = activeTargets.length;
 
       // Poll each competitor independently and concurrently
-      // CRITICAL SLA REQUIREMENT: Never stop after detecting an article or encountering a failed website!
       const checkTasks = activeTargets.map(async (target) => {
         try {
           const result: CheckResult = await checkCompetitorTarget({
@@ -388,105 +251,91 @@ export class ContinuousMonitoringWorker {
           }
           this.totalChecksRecorded++;
 
-          // Persist check cycle record to Firestore
-          if (db) {
-            try {
-              const checkRef = doc(db, "monitoring_checks", checkRecord.id);
-              await setDoc(checkRef, cleanFirestoreData(checkRecord));
-            } catch (pErr) {
-              // Silently protect loop uptime if network drops during log write
-            }
+          // Persist check cycle record to MongoDB
+          try {
+            await saveCheckToMongo(checkRecord);
+          } catch (pErr) {
+            // Silently protect loop uptime if network drops
           }
 
-          // If check encountered error / timeout, record retry trace and log
+          // If check encountered error / timeout, record retry trace and log in MongoDB
           if (result.outcome === "error" || result.outcome === "rate_limited") {
             this.consecutiveErrors++;
-            if (db) {
-              try {
-                const retryId = `ret-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-                const retryRef = doc(db, "retries", retryId);
-                await setDoc(retryRef, cleanFirestoreData({
-                  id: retryId,
-                  timestamp: checkRecord.timestamp,
-                  domain: target.domain,
-                  error: result.error || result.statusResponse,
-                  code: result.statusCode,
-                  attempt: 1,
-                  maxAttempts: 3,
-                  resolution: result.outcome === "rate_limited" ? "Backoff" : "Recovered",
-                  backoffDelay: "30s exponential jitter",
-                  createdAt: now.toISOString()
-                }));
+            try {
+              const retryId = `ret-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+              await saveRetryToMongo({
+                id: retryId,
+                timestamp: checkRecord.timestamp,
+                domain: target.domain,
+                error: result.error || result.statusResponse,
+                code: result.statusCode,
+                attempt: 1,
+                maxAttempts: 3,
+                resolution: result.outcome === "rate_limited" ? "Backoff" : "Recovered",
+                backoffDelay: "30s exponential jitter",
+                createdAt: now.toISOString()
+              });
 
-                const logRef = doc(db, "logs", `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
-                await setDoc(logRef, cleanFirestoreData({
-                  id: logRef.id,
-                  timestamp: now.toISOString().split("T")[1].slice(0, 12),
-                  level: "warn",
-                  source: "worker-resilience",
-                  message: `[Resilient Error Handling] ${target.name} (${target.domain}) returned ${result.statusResponse}. ${result.recoveryAction}`,
-                  durationMs: result.durationMs,
-                  createdAt: now.toISOString()
-                }));
-              } catch {}
-            }
+              const logId = `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+              await saveLogToMongo({
+                id: logId,
+                timestamp: now.toISOString().split("T")[1].slice(0, 12),
+                level: "warn",
+                source: "worker-resilience",
+                message: `[Resilient Error Handling] ${target.name} (${target.domain}) returned ${result.statusResponse}. ${result.recoveryAction}`,
+                durationMs: result.durationMs,
+                createdAt: now.toISOString()
+              });
+            } catch {}
           } else {
             this.consecutiveErrors = 0;
           }
 
-          // Process newly detected articles (Never stops the loop!)
+          // Process newly detected articles
           if (result.articles.length > 0) {
             newlyDetected += result.articles.length;
 
             for (const art of result.articles) {
-              if (db) {
-                try {
-                  const artRef = doc(db, "articles", art.id);
-                  await setDoc(artRef, cleanFirestoreData(art));
+              try {
+                await saveArticleToMongo(art);
 
-                  const logRef = doc(db, "logs", `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
-                  await setDoc(logRef, cleanFirestoreData({
-                    id: logRef.id,
-                    timestamp: now.toISOString().split("T")[1].slice(0, 12),
-                    level: "success",
-                    source: "continuous-worker",
-                    message: `Detected "${art.title}" from ${art.competitor} in ${art.exactDelayText || art.delayFormatted} via ${art.ingestMethod}`,
-                    durationMs: art.delaySec || 0,
-                    createdAt: now.toISOString()
-                  }));
-                } catch (artErr: any) {
-                  console.error("[Continuous Worker] Error saving detected article:", artErr.message);
-                }
+                const logId = `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                await saveLogToMongo({
+                  id: logId,
+                  timestamp: now.toISOString().split("T")[1].slice(0, 12),
+                  level: "success",
+                  source: "continuous-worker",
+                  message: `Detected "${art.title}" from ${art.competitor} in ${art.exactDelayText || art.delayFormatted} via ${art.ingestMethod}`,
+                  durationMs: art.delaySec || 0,
+                  createdAt: now.toISOString()
+                });
+              } catch (artErr: any) {
+                console.error("[Continuous Worker] Error saving detected article to MongoDB:", artErr.message);
               }
             }
           }
 
-          // Update competitor record in Firestore using setDoc with merge: true (avoids NOT_FOUND error)
-          if (db) {
-            try {
-              const compRef = doc(db, "competitors", target.id);
-              const updatedFields: Record<string, any> = {
-                ...target,
-                lastChecked: "Just now",
-                etag: result.etag || target.etag || 'W/"7a3e-9b21"'
-              };
+          // Update competitor record in MongoDB
+          try {
+            const updatedFields: Record<string, any> = {
+              lastChecked: "Just now",
+              etag: result.etag || target.etag || 'W/"7a3e-9b21"'
+            };
 
-              if (result.articles.length > 0) {
-                updatedFields.lastDetection = result.articles[0].title;
-                updatedFields.articlesScraped = (target.articlesScraped || 0) + result.articles.length;
-              } else if (!target.lastDetection || target.lastDetection === "Pending initial sweep") {
-                updatedFields.lastDetection = result.outcome === "cached"
-                  ? "Sweep complete (ETag synced)"
-                  : "Sweep complete (0 new posts)";
-              }
-
-              await setDoc(compRef, cleanFirestoreData(updatedFields), { merge: true });
-            } catch (uErr: any) {
-              // Silently protect loop uptime if network drops during competitor update
+            if (result.articles.length > 0) {
+              updatedFields.lastDetection = result.articles[0].title;
+              updatedFields.articlesScraped = (target.articlesScraped || 0) + result.articles.length;
+            } else if (!target.lastDetection || target.lastDetection === "Pending initial sweep") {
+              updatedFields.lastDetection = result.outcome === "cached"
+                ? "Sweep complete (ETag synced)"
+                : "Sweep complete (0 new posts)";
             }
+
+            await updateCompetitorInMongo(target.id, updatedFields);
+          } catch (uErr: any) {
+            // Silently protect loop uptime
           }
         } catch (targetErr: any) {
-          // Absolute safety boundary: a crash on one target MUST NEVER affect other targets or the worker loop
           console.info(`[Continuous Worker] Target isolation boundary caught error on ${target.name}:`, targetErr.message);
           this.consecutiveErrors++;
         }
@@ -502,7 +351,7 @@ export class ContinuousMonitoringWorker {
     return { newlyDetected, sitesPolled };
   }
 
-  // Simulation test helper to demonstrate resilient error & timeout handling in real time
+  // Simulation test helper
   public async simulateScenario(scenario: 'timeout' | 'http_500' | 'http_403' | 'nominal_304' | 'live_detection', targetName = "Acme AI Corp"): Promise<MonitoringCheckRecord> {
     const now = new Date();
     const domain = `${targetName.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`;
@@ -583,47 +432,41 @@ export class ContinuousMonitoringWorker {
     }
     this.totalChecksRecorded++;
 
-    const db = getServerDb();
-    if (db) {
-      try {
-        const checkRef = doc(db, "monitoring_checks", checkRecord.id);
-        await setDoc(checkRef, cleanFirestoreData(checkRecord));
+    try {
+      await saveCheckToMongo(checkRecord);
 
-        if (outcome === "error") {
-          const retryId = `ret-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          const retryRef = doc(db, "retries", retryId);
-          await setDoc(retryRef, cleanFirestoreData({
-            id: retryId,
-            timestamp: checkRecord.timestamp,
-            domain,
-            error: error || statusResponse,
-            code: statusCode,
-            attempt: 1,
-            maxAttempts: 3,
-            resolution: "Recovered",
-            backoffDelay: "30s exponential jitter",
-            createdAt: now.toISOString()
-          }));
-        }
-
-        const logRef = doc(db, "logs", `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
-        await setDoc(logRef, cleanFirestoreData({
-          id: logRef.id,
-          timestamp: now.toISOString().split("T")[1].slice(0, 12),
-          level: outcome === "error" ? "warn" : "info",
-          source: "error-handling-simulator",
-          message: `[Simulated Check] ${targetName} (${domain}) -> ${statusResponse}. ${recoveryAction}`,
-          durationMs,
+      if (outcome === "error") {
+        const retryId = `ret-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        await saveRetryToMongo({
+          id: retryId,
+          timestamp: checkRecord.timestamp,
+          domain,
+          error: error || statusResponse,
+          code: statusCode,
+          attempt: 1,
+          maxAttempts: 3,
+          resolution: "Recovered",
+          backoffDelay: "30s exponential jitter",
           createdAt: now.toISOString()
-        }));
-      } catch (err: any) {
-        console.warn("[Continuous Worker] Warning saving simulated check to db:", err.message);
+        });
       }
+
+      const logId = `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      await saveLogToMongo({
+        id: logId,
+        timestamp: now.toISOString().split("T")[1].slice(0, 12),
+        level: outcome === "error" ? "warn" : "info",
+        source: "error-handling-simulator",
+        message: `[Simulated Check] ${targetName} (${domain}) -> ${statusResponse}. ${recoveryAction}`,
+        durationMs,
+        createdAt: now.toISOString()
+      });
+    } catch (err: any) {
+      console.warn("[Continuous Worker] Warning saving simulated check to MongoDB:", err.message);
     }
 
     return checkRecord;
   }
 }
 
-// Global Singleton Worker Instance
 export const continuousWorker = new ContinuousMonitoringWorker();

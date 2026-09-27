@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   NavigationTab, 
   Article, 
@@ -53,6 +53,40 @@ export default function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const mainScrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-reset scroll to top on all scrollable elements when switching pages or navigating between articles
+  useEffect(() => {
+    const resetScrollPosition = () => {
+      // 1. Reset main view scroll ref
+      if (mainScrollRef.current) {
+        mainScrollRef.current.scrollTop = 0;
+        mainScrollRef.current.scrollLeft = 0;
+      }
+      // 2. Reset global window and body scroll
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      if (document.body) document.body.scrollTop = 0;
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+
+      // 3. Reset any inner scrollable containers in child views
+      const scrollableElements = document.querySelectorAll<HTMLElement>(
+        '.overflow-y-auto, .overflow-auto, .overflow-y-scroll, main, [data-scrollable="true"]'
+      );
+      scrollableElements.forEach(el => {
+        el.scrollTop = 0;
+        el.scrollLeft = 0;
+      });
+    };
+
+    resetScrollPosition();
+    const rafId = requestAnimationFrame(resetScrollPosition);
+    const timerId = setTimeout(resetScrollPosition, 50);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(timerId);
+    };
+  }, [activeTab, selectedArticle?.id]);
 
   // Global Keyboard Shortcuts (Ctrl+K / Cmd+K)
   useEffect(() => {
@@ -539,7 +573,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto">
+      <div ref={mainScrollRef} className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto">
         {/* Top Header */}
         <Header
           onOpenSearch={() => setIsSearchOpen(true)}

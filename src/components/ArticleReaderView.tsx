@@ -71,13 +71,25 @@ export const ArticleReaderView: React.FC<ArticleReaderViewProps> = ({
   const [readerPage, setReaderPage] = useState(1);
   const [readerPageSize, setReaderPageSize] = useState(10);
 
+  // Mobile View state
+  const [mobileActiveView, setMobileActiveView] = useState<'list' | 'detail'>('detail');
+
   // Auto-reset page on filter or search changes
   React.useEffect(() => {
     setReaderPage(1);
   }, [searchQuery, competitorFilter, threatFilter, slaFilter, readerSort]);
 
-  // Mobile View state
-  const [mobileActiveView, setMobileActiveView] = useState<'list' | 'detail'>('detail');
+  // Auto-reset scroll positions on article switch or sub-tab switch
+  React.useEffect(() => {
+    const resetReaderScroll = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      const scrollables = document.querySelectorAll<HTMLElement>('.overflow-y-auto, .overflow-auto, .overflow-y-scroll');
+      scrollables.forEach(el => { el.scrollTop = 0; });
+    };
+    resetReaderScroll();
+    const rafId = requestAnimationFrame(resetReaderScroll);
+    return () => cancelAnimationFrame(rafId);
+  }, [article?.id, activeTab, mobileActiveView, readerPage]);
 
   // Unique Competitor List
   const competitorOptions = useMemo(() => {
@@ -778,7 +790,7 @@ export const ArticleReaderView: React.FC<ArticleReaderViewProps> = ({
                         </div>
                         <div className="flex items-center space-x-2">
                           <span className="text-[10px] px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-telemetry-mono font-medium">
-                            gemini-2.5-flash
+                            gemini-3.8-flash
                           </span>
                           {currentArticle.analysis && (
                             <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-telemetry-mono font-medium">

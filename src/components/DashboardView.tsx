@@ -99,7 +99,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [showSimMenu, setShowSimMenu] = useState(false);
   const [breachTab, setBreachTab] = useState<'breaches' | 'backlog'>('breaches');
   const [ingestFilter, setIngestFilter] = useState<'all' | 'live' | 'backlog'>('all');
-  const [dashboardTab, setDashboardTab] = useState<'overview' | 'competitors_health' | 'live_feed'>('overview');
 
   // Pagination & Sorting state
   const [articleSort, setArticleSort] = useState<'latest' | 'oldest' | 'delay_fastest' | 'delay_slowest' | 'threat'>('latest');
@@ -406,75 +405,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div id="dashboard-view-container" className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
-      {/* Top Header & Tab Navigator */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-slate-200/80">
-        <div>
-          <div className="flex items-center space-x-2 mb-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 font-mono-tech">
-              Dashboard &amp; Real-Time Performance Analytics
+      {/* Top Header & Action Toolbar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+              Dashboard &amp; Real-Time Analytics
             </h1>
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 font-telemetry-mono shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Live Engine</span>
+            </span>
           </div>
-          <p className="text-xs sm:text-sm text-slate-500 max-w-3xl">
-            Autonomous competitor monitoring hub with sub-5m detection benchmarks, real-time alert feed, and live health telemetry.
+          <p className="text-xs sm:text-sm text-slate-500 max-w-2xl">
+            Autonomous competitor monitoring hub with sub-5m detection benchmarks, live alert feed, and crawler health telemetry.
           </p>
         </div>
 
-        {/* Action Controls & Navigation Pills */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Section 9 View Tab Switcher */}
-          <div className="flex items-center bg-slate-100 border border-slate-200 p-1 rounded-xl text-xs">
-            <button
-              onClick={() => setDashboardTab('overview')}
-              className={`px-3 py-1.5 rounded-lg transition-all font-semibold flex items-center space-x-1.5 cursor-pointer ${
-                dashboardTab === 'overview'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span>Metrics & Latency</span>
-            </button>
-            <button
-              onClick={() => setDashboardTab('competitors_health')}
-              className={`px-3 py-1.5 rounded-lg transition-all font-semibold flex items-center space-x-1.5 cursor-pointer ${
-                dashboardTab === 'competitors_health'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Competitor Health ({totalCompetitorsCount})</span>
-            </button>
-            <button
-              onClick={() => setDashboardTab('live_feed')}
-              className={`px-3 py-1.5 rounded-lg transition-all font-semibold flex items-center space-x-1.5 cursor-pointer ${
-                dashboardTab === 'live_feed'
-                  ? 'bg-white text-indigo-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Bell className="w-3.5 h-3.5 text-amber-500" />
-              <span>Live Alerts ({articles.length})</span>
-            </button>
-          </div>
-
+        {/* Action Controls Toolbar */}
+        <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
           {onNavigateToReports && (
             <button
               id="dashboard-open-reports-btn"
               onClick={onNavigateToReports}
-              className="flex items-center space-x-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-2xs cursor-pointer"
+              className="inline-flex items-center space-x-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-2xs cursor-pointer"
               title="Open SLA Performance Reports and System Architecture Documentation"
             >
               <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
-              <span>SLA Reports &amp; Docs</span>
+              <span>Reports</span>
             </button>
           )}
 
           <button
             id="export-csv-btn"
             onClick={handleExportCSV}
-            className="flex items-center space-x-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-2xs cursor-pointer"
+            className="inline-flex items-center space-x-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-2xs cursor-pointer"
+            title="Export filtered article intelligence to CSV"
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
             <span>Export CSV</span>
@@ -485,11 +451,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               id="open-controlled-demo-modal-btn"
               onClick={() => setShowControlledDemoModal(true)}
-              className="flex items-center space-x-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+              className="inline-flex items-center space-x-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all shadow-2xs cursor-pointer"
               title="Publish on controlled demo sources with customizable parameters and observe real-time detection"
             >
               <Send className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Controlled Demo Hub</span>
+              <span>Demo Hub</span>
             </button>
           )}
 
@@ -500,7 +466,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <button
                   id="page-publish-test-btn"
                   onClick={() => onPublishTestPost(undefined, undefined, 'live_fast')}
-                  className="flex items-center space-x-1.5 hover:bg-amber-100/90 text-amber-900 px-3 py-1.5 rounded-l-lg text-xs font-semibold transition-all cursor-pointer"
+                  className="flex items-center space-x-1 hover:bg-amber-100/90 text-amber-900 px-2.5 py-1.5 rounded-l-lg text-xs font-semibold transition-all cursor-pointer"
                   title="Simulate live detection event"
                 >
                   <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500/20 shrink-0" />
@@ -564,17 +530,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           )}
 
-          {/* Trigger Scan Button */}
+          {/* Trigger Scan Primary Button */}
           <button
             id="page-trigger-scan-btn"
             onClick={onTriggerScan}
             disabled={isScanning}
-            className={`flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition-all cursor-pointer ${
+            className={`inline-flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition-all cursor-pointer ${
               isScanning ? 'opacity-75 cursor-not-allowed' : 'hover:scale-[1.02] active:scale-[0.98]'
             }`}
           >
             <Play className={`w-3.5 h-3.5 fill-white ${isScanning ? 'animate-spin' : ''}`} />
-            <span>{isScanning ? 'Crawling Targets...' : 'Trigger Global Sweep'}</span>
+            <span>{isScanning ? 'Crawling...' : 'Trigger Scan'}</span>
           </button>
         </div>
       </div>
@@ -705,492 +671,125 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* ========================================================================= */}
-      {/* SECTION 9.1: COMPETITOR HEALTH OVERVIEW (Dedicated Interactive Section)   */}
+      {/* MAIN COMMAND CENTER: 12-COLUMN RESPONSIVE SPLIT (8-Col Primary / 4-Col Hub) */}
       {/* ========================================================================= */}
-      {(dashboardTab === 'competitors_health' || dashboardTab === 'overview') && (
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-            <div>
-              <div className="flex items-center space-x-2">
-                <Globe className="w-4 h-4 text-indigo-600" />
-                <h2 className="text-base font-bold text-slate-900 font-mono-tech">
-                  Competitor Health Overview
-                </h2>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold font-telemetry-mono">
-                  {totalCompetitorsCount} Monitored
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Real-time online/offline status, last checked timestamps, and automated ingestion strategies across all targets.
-              </p>
-            </div>
-
-            {/* Quick Filter & Search Bar */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-xs">
-                <button
-                  onClick={() => setCompetitorStatusFilter('all')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                    competitorStatusFilter === 'all' ? 'bg-white text-indigo-700 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  All ({competitors.length})
-                </button>
-                <button
-                  onClick={() => setCompetitorStatusFilter('Active')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-all flex items-center space-x-1 ${
-                    competitorStatusFilter === 'Active' ? 'bg-white text-emerald-700 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  <span>Active ({activeCompetitorsCount})</span>
-                </button>
-                <button
-                  onClick={() => setCompetitorStatusFilter('Paused')}
-                  className={`px-2.5 py-1 rounded-md font-medium transition-all flex items-center space-x-1 ${
-                    competitorStatusFilter === 'Paused' ? 'bg-white text-amber-700 shadow-2xs font-semibold' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                  <span>Paused ({pausedCompetitorsCount})</span>
-                </button>
-              </div>
-
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Filter competitor..."
-                  value={competitorSearch}
-                  onChange={(e) => setCompetitorSearch(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-indigo-500 font-telemetry-mono"
-                />
-              </div>
-
-              {onNavigateToCompetitors && (
-                <button
-                  onClick={onNavigateToCompetitors}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center space-x-1 ml-1 cursor-pointer"
-                >
-                  <span>Manage</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Competitor Health Grid / Table */}
-          {competitors.length === 0 ? (
-            <div className="py-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 space-y-2">
-              <Globe className="w-6 h-6 text-slate-300 mx-auto" />
-              <p className="text-xs font-semibold text-slate-700">No Competitor Targets Configured Yet</p>
-              <p className="text-[11px] text-slate-400">Add competitor websites to begin automated health polling and content detection.</p>
-              {onNavigateToCompetitors && (
-                <button
-                  onClick={onNavigateToCompetitors}
-                  className="mt-2 inline-flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
-                >
-                  <Globe className="w-3.5 h-3.5" />
-                  <span>Add First Competitor Target</span>
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {paginatedCompetitors.map((comp) => {
-                  const isActive = comp.status === 'Active';
-                  const strategy = comp.strategy || 'Hybrid RSS+Sitemap';
-                  const articlesCountForComp = articles.filter(a => a.competitor === comp.name || a.competitorDomain === comp.domain).length;
-
-                  return (
-                    <div
-                      key={comp.id}
-                      className="p-3.5 rounded-xl bg-slate-50/70 hover:bg-slate-50 border border-slate-200 hover:border-indigo-200 transition-all space-y-2.5 shadow-2xs"
-                    >
-                      {/* Header: Name, Domain & Online/Offline Status */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h4 className="text-xs font-bold text-slate-900 leading-snug truncate max-w-[200px]">
-                            {comp.name}
-                          </h4>
-                          <span className="text-[11px] text-slate-500 font-telemetry-mono block truncate">
-                            {comp.domain}
-                          </span>
-                        </div>
-
-                        {/* Online/Offline Status Badge */}
-                        <span
-                          className={`inline-flex items-center space-x-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full font-telemetry-mono ${
-                            isActive
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-slate-100 text-slate-600 border border-slate-200'
-                          }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                          <span>{isActive ? 'Online / Active' : 'Paused / Offline'}</span>
-                        </span>
-                      </div>
-
-                      {/* Strategy and Cadence Strip */}
-                      <div className="space-y-1 text-[11px] font-telemetry-mono bg-white p-2 rounded-lg border border-slate-100">
-                        <div className="flex items-center justify-between text-slate-600">
-                          <span className="text-slate-400">Strategy:</span>
-                          <span className="font-semibold text-indigo-700">{strategy}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-slate-600">
-                          <span className="text-slate-400">Last Checked:</span>
-                          <span className="font-medium text-slate-800">{comp.lastChecked || 'Just now'}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-slate-600">
-                          <span className="text-slate-400">Captured Articles:</span>
-                          <span className="font-bold text-slate-900">{articlesCountForComp || comp.articlesScraped || 0}</span>
-                        </div>
-                      </div>
-
-                      {/* Quick Probe Action */}
-                      {onForceCrawl && (
-                        <div className="flex items-center justify-between pt-1 text-[11px]">
-                          <span className="text-[10px] text-emerald-700 font-semibold font-telemetry-mono">
-                            {comp.healthScore || 100}% Health Score
-                          </span>
-                          <button
-                            onClick={() => onForceCrawl(comp)}
-                            disabled={isScanning}
-                            className="flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-semibold hover:underline cursor-pointer disabled:opacity-50"
-                          >
-                            <RefreshCw className={`w-3 h-3 ${isScanning ? 'animate-spin' : ''}`} />
-                            <span>Probe Now</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {filteredCompetitors.length > 0 && (
-                <Pagination
-                  currentPage={compPage}
-                  totalItems={filteredCompetitors.length}
-                  pageSize={compPageSize}
-                  onPageChange={setCompPage}
-                  onPageSizeChange={setCompPageSize}
-                  pageSizeOptions={[3, 6, 12, 'all']}
-                  itemName="competitors"
-                />
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* SECTION 9.2: REAL-TIME NOTIFICATION FEED (Live Alerts on Dashboard)       */}
-      {/* ========================================================================= */}
-      {(dashboardTab === 'live_feed' || dashboardTab === 'overview') && (
-        <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-            <div>
-              <div className="flex items-center space-x-2">
-                <Bell className="w-4 h-4 text-amber-500 animate-bounce" />
-                <h2 className="text-base font-bold text-slate-900 font-mono-tech">
-                  Real-Time Notification Feed
-                </h2>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold font-telemetry-mono flex items-center space-x-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                  <span>Live Stream Connected</span>
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Instant notification alerts triggered whenever fresh competitor articles are detected.
-              </p>
-            </div>
-
-            {/* Notification Filter Controls */}
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <button
-                onClick={() => setNotificationFilter('all')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
-                  notificationFilter === 'all'
-                    ? 'bg-slate-900 text-white font-semibold shadow-2xs'
-                    : 'bg-slate-100 text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                All Alerts ({articles.length})
-              </button>
-              <button
-                onClick={() => setNotificationFilter('high_threat')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center space-x-1 cursor-pointer ${
-                  notificationFilter === 'high_threat'
-                    ? 'bg-rose-600 text-white font-semibold shadow-2xs'
-                    : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
-                }`}
-              >
-                <ShieldAlert className="w-3 h-3" />
-                <span>High Threat</span>
-              </button>
-              <button
-                onClick={() => setNotificationFilter('sla_met')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center space-x-1 cursor-pointer ${
-                  notificationFilter === 'sla_met'
-                    ? 'bg-emerald-600 text-white font-semibold shadow-2xs'
-                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
-                }`}
-              >
-                <Zap className="w-3 h-3 fill-current" />
-                <span>SLA Met (≤5m)</span>
-              </button>
-              <button
-                onClick={() => setNotificationFilter('sla_breached')}
-                className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center space-x-1 cursor-pointer ${
-                  notificationFilter === 'sla_breached'
-                    ? 'bg-amber-600 text-white font-semibold shadow-2xs'
-                    : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
-                }`}
-              >
-                <AlertTriangle className="w-3 h-3" />
-                <span>SLA Breaches</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Live Notification Cards List */}
-          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-            {sortedNotificationArticles.length === 0 ? (
-              <div className="p-8 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-2">
-                <Bell className="w-6 h-6 text-slate-300 mx-auto" />
-                <p className="text-xs font-semibold text-slate-700">No New Alerts Matching Filter</p>
-                <p className="text-[11px] text-slate-400">Live alerts will appear automatically when crawler sweeps or simulation triggers detect new competitor posts.</p>
-              </div>
-            ) : (
-              paginatedNotificationArticles.map((art, idx) => {
-                const isSlaMet = !art.isBackCatalog && art.delaySec <= 300;
-                const threatRating = art.threatRating || art.analysis?.threatRating || 'Low';
-
-                return (
-                  <div
-                    key={art.id || `notif-${idx}`}
-                    className="p-4 rounded-xl bg-white hover:bg-indigo-50/30 border border-slate-200/90 hover:border-indigo-300 transition-all space-y-2.5 shadow-2xs group"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center space-x-2">
-                        {/* New Alert Badge */}
-                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase font-telemetry-mono bg-indigo-100 text-indigo-800 border border-indigo-200">
-                          <Radio className="w-2.5 h-2.5 text-indigo-600 animate-pulse" />
-                          <span>NEW DETECTION</span>
-                        </span>
-
-                        <span className="font-bold text-xs text-slate-900 font-telemetry-mono">
-                          {art.competitor}
-                        </span>
-
-                        <span className="text-[11px] text-slate-500 font-telemetry-mono">
-                          via {art.publicationSource || art.ingestMethod}
-                        </span>
-                      </div>
-
-                      {/* Detection Delay Pill */}
-                      <div className="flex items-center space-x-2 text-xs font-telemetry-mono">
-                        <span
-                          className={`px-2 py-0.5 rounded font-bold ${
-                            art.isBackCatalog
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                              : isSlaMet
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-rose-50 text-rose-700 border border-rose-200'
-                          }`}
-                        >
-                          {art.isBackCatalog ? 'HISTORICAL' : (isSlaMet ? `⚡ ${art.delayFormatted} (SLA MET)` : `⚠️ ${art.delayFormatted} (SLA BREACHED)`)}
-                        </span>
-                        <span className="text-slate-400">{art.discoveredAt?.split(' ')[0] || 'Just now'}</span>
-                      </div>
-                    </div>
-
-                    {/* Headline */}
-                    <div className="flex items-start justify-between gap-3">
-                      <h3
-                        onClick={() => onSelectArticle(art)}
-                        className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors cursor-pointer leading-snug line-clamp-2"
-                      >
-                        {art.title}
-                      </h3>
-                      <button
-                        onClick={() => onSelectArticle(art)}
-                        className="shrink-0 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded-lg transition-all flex items-center space-x-1 cursor-pointer"
-                      >
-                        <span>Inspect Intel</span>
-                        <ChevronRight className="w-3 h-3" />
-                      </button>
-                    </div>
-
-                    {/* Snippet / Takeaway */}
-                    <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
-                      {art.snippet || art.content.slice(0, 180) + '...'}
-                    </p>
-
-                    {/* Footer Badges */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 text-[10px]">
-                      <div className="flex items-center space-x-2">
-                        <span
-                          className={`px-2 py-0.5 rounded font-bold uppercase font-telemetry-mono ${
-                            threatRating === 'High'
-                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                              : threatRating === 'Medium'
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                              : 'bg-slate-100 text-slate-600 border border-slate-200'
-                          }`}
-                        >
-                          Threat: {threatRating}
-                        </span>
-                        {art.tags.slice(0, 3).map((tag, tIdx) => (
-                          <span key={tIdx} className="text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200/60">
-                            #{typeof tag === 'string' ? tag : (tag as any)?.name}
-                          </span>
-                        ))}
-                      </div>
-
-                      <span className="text-slate-400 font-telemetry-mono">
-                        Word count: {art.wordCount || art.content.split(' ').length} words
-                      </span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {sortedNotificationArticles.length > 0 && (
-            <Pagination
-              currentPage={notifPage}
-              totalItems={sortedNotificationArticles.length}
-              pageSize={notifPageSize}
-              onPageChange={setNotifPage}
-              onPageSizeChange={setNotifPageSize}
-              pageSizeOptions={[5, 10, 20, 'all']}
-              itemName="notification alerts"
-            />
-          )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* REAL-TIME DETECTION DELAY SLA TELEMETRY CHART                             */}
-      {/* ========================================================================= */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-          <div>
-            <div className="flex items-center space-x-2">
-              <BarChart3 className="w-4 h-4 text-indigo-600" />
-              <h3 className="text-base font-bold text-slate-900 font-mono-tech">
-                Real-Time Detection Latency vs. 5-Minute SLA Benchmark
-              </h3>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Live crawler cycle latency telemetry across recent article ingestion events (Benchmark: 5m / 300s).
-            </p>
-          </div>
-          <div className="flex items-center space-x-3 text-xs font-telemetry-mono">
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              <span className="text-slate-600">Detection Latency</span>
-            </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-0.5 bg-rose-500" />
-              <span className="text-rose-600 font-semibold">5m SLA Benchmark Line</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Responsive Chart Container */}
-        <div className="responsive-container w-full h-[300px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart 
-              data={telemetryChartData}
-              margin={{ top: 15, right: 25, left: 0, bottom: 5 }}
-            >
-              <defs>
-                <linearGradient id="latencyAreaGradient" x1="0" y1="0" x2="0" y2="1">
-                  {chartHasBreach ? (
-                    <>
-                      <stop offset="0%" stopColor="#EF4444" stopOpacity={0.45} />
-                      <stop offset={`${breachGradientOffset}%`} stopColor="#EF4444" stopOpacity={0.25} />
-                      <stop offset={`${breachGradientOffset}%`} stopColor="#10B981" stopOpacity={0.25} />
-                      <stop offset="100%" stopColor="#10B981" stopOpacity={0.01} />
-                    </>
-                  ) : (
-                    <>
-                      <stop offset="0%" stopColor="#10B981" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#10B981" stopOpacity={0.01} />
-                    </>
-                  )}
-                </linearGradient>
-                <linearGradient id="latencyStrokeGradient" x1="0" y1="0" x2="0" y2="1">
-                  {chartHasBreach ? (
-                    <>
-                      <stop offset="0%" stopColor="#EF4444" />
-                      <stop offset={`${breachGradientOffset}%`} stopColor="#EF4444" />
-                      <stop offset={`${breachGradientOffset}%`} stopColor="#10B981" />
-                      <stop offset="100%" stopColor="#10B981" />
-                    </>
-                  ) : (
-                    <stop offset="0%" stopColor="#10B981" />
-                  )}
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis 
-                dataKey="name" 
-                stroke="#94a3b8" 
-                fontSize={11} 
-                tickLine={false} 
-                interval="preserveStartEnd"
-                minTickGap={35}
-                height={32}
-                dy={4}
-              />
-              <YAxis 
-                stroke="#94a3b8" 
-                fontSize={11} 
-                tickLine={false} 
-                tickFormatter={formatLatencyTick}
-                domain={[0, (dataMax: number) => Math.max(360, Math.ceil((dataMax * 1.15) / 60) * 60)]}
-              />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
-                formatter={(value: any, name: any, item: any) => [
-                  `${value}s (${item?.payload?.formattedDelay || `${Math.floor(Number(value) / 60)}m ${Number(value) % 60}s`}) ${Number(value) > 300 ? '⚠️ [SLA BREACHED]' : '✅ [SLA MET]'}`,
-                  'Detection Latency'
-                ]}
-                labelFormatter={(label, payload) => {
-                  const item = payload?.[0]?.payload;
-                  return `${label}${item?.competitor ? ` · ${item.competitor}` : ''}${item?.title ? ` - ${item.title}` : ''}`;
-                }}
-              />
-              <ReferenceLine 
-                y={300} 
-                stroke="#EF4444" 
-                strokeDasharray="4 4" 
-                strokeWidth={1.5}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="delay" 
-                stroke={chartHasBreach ? "url(#latencyStrokeGradient)" : "#10B981"} 
-                strokeWidth={2.5} 
-                fillOpacity={1} 
-                fill="url(#latencyAreaGradient)" 
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Main 70/30 Split Layout for Deep Feeds & Daemon Terminals */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column (70% - 8 cols): Live Detected Articles Master Table */}
-        <div className="lg:col-span-8 space-y-4">
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-4">
+        {/* ======================================================================= */}
+        {/* LEFT COLUMN (8 cols): SLA Latency Telemetry Chart + Master Articles Feed */}
+        {/* ======================================================================= */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* REAL-TIME DETECTION DELAY SLA TELEMETRY CHART */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <BarChart3 className="w-4 h-4 text-indigo-600" />
+                  <h3 className="text-base font-bold text-slate-900 font-mono-tech">
+                    Real-Time Detection Latency vs. 5-Minute SLA Benchmark
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Live crawler cycle latency telemetry across recent article ingestion events (Benchmark: 5m / 300s).
+                </p>
+              </div>
+              <div className="flex items-center space-x-3 text-xs font-telemetry-mono">
+                <div className="flex items-center space-x-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  <span className="text-slate-600">Detection Latency</span>
+                </div>
+                <div className="flex items-center space-x-1.5">
+                  <span className="w-2.5 h-0.5 bg-rose-500" />
+                  <span className="text-rose-600 font-semibold">5m SLA Benchmark Line</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Responsive Chart Container */}
+            <div className="responsive-container w-full h-[280px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart 
+                  data={telemetryChartData}
+                  margin={{ top: 15, right: 25, left: 0, bottom: 5 }}
+                >
+                  <defs>
+                    <linearGradient id="latencyAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                      {chartHasBreach ? (
+                        <>
+                          <stop offset="0%" stopColor="#EF4444" stopOpacity={0.45} />
+                          <stop offset={`${breachGradientOffset}%`} stopColor="#EF4444" stopOpacity={0.25} />
+                          <stop offset={`${breachGradientOffset}%`} stopColor="#10B981" stopOpacity={0.25} />
+                          <stop offset="100%" stopColor="#10B981" stopOpacity={0.01} />
+                        </>
+                      ) : (
+                        <>
+                          <stop offset="0%" stopColor="#10B981" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="#10B981" stopOpacity={0.01} />
+                        </>
+                      )}
+                    </linearGradient>
+                    <linearGradient id="latencyStrokeGradient" x1="0" y1="0" x2="0" y2="1">
+                      {chartHasBreach ? (
+                        <>
+                          <stop offset="0%" stopColor="#EF4444" />
+                          <stop offset={`${breachGradientOffset}%`} stopColor="#EF4444" />
+                          <stop offset={`${breachGradientOffset}%`} stopColor="#10B981" />
+                          <stop offset="100%" stopColor="#10B981" />
+                        </>
+                      ) : (
+                        <stop offset="0%" stopColor="#10B981" />
+                      )}
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#94a3b8" 
+                    fontSize={11} 
+                    tickLine={false} 
+                    interval="preserveStartEnd"
+                    minTickGap={35}
+                    height={32}
+                    dy={4}
+                  />
+                  <YAxis 
+                    stroke="#94a3b8" 
+                    fontSize={11} 
+                    tickLine={false} 
+                    tickFormatter={formatLatencyTick}
+                    domain={[0, (dataMax: number) => Math.max(360, Math.ceil((dataMax * 1.15) / 60) * 60)]}
+                  />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
+                    formatter={(value: any, name: any, item: any) => [
+                      `${value}s (${item?.payload?.formattedDelay || `${Math.floor(Number(value) / 60)}m ${Number(value) % 60}s`}) ${Number(value) > 300 ? '⚠️ [SLA BREACHED]' : '✅ [SLA MET]'}`,
+                      'Detection Latency'
+                    ]}
+                    labelFormatter={(label, payload) => {
+                      const item = payload?.[0]?.payload;
+                      return `${label}${item?.competitor ? ` · ${item.competitor}` : ''}${item?.title ? ` - ${item.title}` : ''}`;
+                    }}
+                  />
+                  <ReferenceLine 
+                    y={300} 
+                    stroke="#EF4444" 
+                    strokeDasharray="4 4" 
+                    strokeWidth={1.5}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="delay" 
+                    stroke={chartHasBreach ? "url(#latencyStrokeGradient)" : "#10B981"} 
+                    strokeWidth={2.5} 
+                    fillOpacity={1} 
+                    fill="url(#latencyAreaGradient)" 
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* INGESTED INTELLIGENCE REPOSITORY MASTER STREAM */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/80">
               <div className="flex items-center space-x-2">
                 <Radio className="w-4 h-4 text-emerald-500 animate-pulse" />
@@ -1214,8 +813,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
 
-            {/* Filter Row */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-b border-slate-100 pb-2.5">
+            {/* Filter & Sort Row */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-b border-slate-100 pb-2.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-500 mr-1 flex items-center font-medium">
                   Classification:
@@ -1254,30 +853,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                {[
-                  { id: 'all', label: 'All Protocols' },
-                  { id: 'rss', label: 'RSS' },
-                  { id: 'sitemap', label: 'Sitemap' },
-                  { id: 'dom', label: 'DOM' },
-                ].map((pill) => (
-                  <button
-                    key={pill.id}
-                    onClick={() => setSourceFilter(pill.id)}
-                    className={`text-[11px] px-2.5 py-0.5 rounded transition-all font-medium cursor-pointer ${
-                      sourceFilter === pill.id
-                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
+              {/* Protocols Filter and Sort Selector */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { id: 'all', label: 'All Protocols' },
+                    { id: 'rss', label: 'RSS' },
+                    { id: 'sitemap', label: 'Sitemap' },
+                    { id: 'dom', label: 'DOM' },
+                  ].map((pill) => (
+                    <button
+                      key={pill.id}
+                      onClick={() => setSourceFilter(pill.id)}
+                      className={`text-[11px] px-2.5 py-0.5 rounded transition-all font-medium cursor-pointer ${
+                        sourceFilter === pill.id
+                          ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      {pill.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center space-x-1.5 text-xs font-telemetry-mono pl-2 border-l border-slate-200">
+                  <span className="text-slate-400 text-[11px]">Sort:</span>
+                  <select
+                    value={articleSort}
+                    onChange={(e) => setArticleSort(e.target.value as any)}
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                   >
-                    {pill.label}
-                  </button>
-                ))}
+                    <option value="latest">Latest / Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                    <option value="delay_fastest">Fastest SLA Speed</option>
+                    <option value="delay_slowest">Slowest Latency</option>
+                    <option value="threat">Highest Threat</option>
+                  </select>
+                </div>
               </div>
             </div>
 
             {/* Articles List */}
-            <div className="space-y-3.5 pt-2 max-h-[580px] overflow-y-auto pr-2">
+            <div className="space-y-3.5 pt-2 max-h-[720px] overflow-y-auto pr-2">
               {articles.length === 0 ? (
                 <div className="bg-slate-50/70 border border-dashed border-slate-300 rounded-2xl p-8 sm:p-12 text-center space-y-4">
                   <div className="w-12 h-12 bg-white border border-slate-200 rounded-xl flex items-center justify-center mx-auto text-indigo-600 shadow-2xs">
@@ -1316,7 +933,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <p className="text-sm text-slate-500">No articles matched your active filters.</p>
                 </div>
               ) : (
-                displayedArticles.map((article) => {
+                paginatedArticles.map((article) => {
                   const isHistorical = !!article.isBackCatalog;
                   const isSlaMet = !isHistorical && article.delaySec <= 300;
                   return (
@@ -1418,7 +1035,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               article.threatRating === 'High'
                                 ? 'bg-rose-50 text-rose-700 border border-rose-200'
                                 : article.threatRating === 'Medium'
-                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
                                 : 'bg-slate-100 text-slate-600 border border-slate-200'
                             }`}
                           >
@@ -1453,27 +1070,297 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               )}
             </div>
 
-            {articles.length > 0 && (
-              <div className="pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <span className="text-xs text-slate-500 font-telemetry-mono">
-                  Showing top {displayedArticles.length} of {filteredArticles.length} detected articles
-                </span>
-                <button
-                  id="view-all-articles-stream-btn"
-                  onClick={onNavigateToArticles}
-                  className="w-full sm:w-auto inline-flex items-center justify-center space-x-2 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 px-4 py-2 rounded-xl transition-all shadow-2xs hover:shadow-xs group cursor-pointer"
-                >
-                  <span>View All Articles in Stream</span>
-                  <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
-                </button>
+            {sortedArticles.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <Pagination
+                  currentPage={articlePage}
+                  totalItems={sortedArticles.length}
+                  pageSize={articlePageSize}
+                  onPageChange={setArticlePage}
+                  onPageSizeChange={setArticlePageSize}
+                  pageSizeOptions={[5, 10, 20, 50, 'all']}
+                  itemName="detected articles"
+                />
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    id="view-all-articles-stream-btn"
+                    onClick={onNavigateToArticles}
+                    className="w-full sm:w-auto inline-flex items-center justify-center space-x-2 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 px-4 py-2 rounded-xl transition-all shadow-2xs hover:shadow-xs group cursor-pointer"
+                  >
+                    <span>View All Articles in Stream Reader</span>
+                    <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* Right Column (30% - 4 cols): Latency Extremes, Efficiency, Live Daemon Logs */}
+        {/* ======================================================================= */}
+        {/* RIGHT COLUMN (4 cols): Live Alerts + Competitor Fleet + Latency + Tail  */}
+        {/* ======================================================================= */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Card 1: Latency Extremes & SLAs */}
+          {/* 1. REAL-TIME NOTIFICATION FEED (Live Alerts) */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <Bell className="w-4 h-4 text-amber-500 animate-bounce" />
+                  <h2 className="text-sm font-bold text-slate-900 font-mono-tech">
+                    Live Notification Feed
+                  </h2>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Instant detection events across monitored blogs.
+                </p>
+              </div>
+
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold font-telemetry-mono inline-flex items-center space-x-1 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                <span>Live</span>
+              </span>
+            </div>
+
+            {/* Notification Filter Controls */}
+            <div className="flex flex-wrap items-center gap-1 text-[11px]">
+              <button
+                onClick={() => setNotificationFilter('all')}
+                className={`px-2 py-0.5 rounded-md font-medium transition-all cursor-pointer ${
+                  notificationFilter === 'all'
+                    ? 'bg-slate-900 text-white font-semibold shadow-2xs'
+                    : 'bg-slate-100 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                All ({articles.length})
+              </button>
+              <button
+                onClick={() => setNotificationFilter('high_threat')}
+                className={`px-2 py-0.5 rounded-md font-medium transition-all flex items-center space-x-1 cursor-pointer ${
+                  notificationFilter === 'high_threat'
+                    ? 'bg-rose-600 text-white font-semibold shadow-2xs'
+                    : 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                }`}
+              >
+                <ShieldAlert className="w-2.5 h-2.5" />
+                <span>High Threat</span>
+              </button>
+              <button
+                onClick={() => setNotificationFilter('sla_met')}
+                className={`px-2 py-0.5 rounded-md font-medium transition-all flex items-center space-x-1 cursor-pointer ${
+                  notificationFilter === 'sla_met'
+                    ? 'bg-emerald-600 text-white font-semibold shadow-2xs'
+                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                }`}
+              >
+                <Zap className="w-2.5 h-2.5 fill-current" />
+                <span>SLA Met</span>
+              </button>
+              <button
+                onClick={() => setNotificationFilter('sla_breached')}
+                className={`px-2 py-0.5 rounded-md font-medium transition-all flex items-center space-x-1 cursor-pointer ${
+                  notificationFilter === 'sla_breached'
+                    ? 'bg-amber-600 text-white font-semibold shadow-2xs'
+                    : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                }`}
+              >
+                <AlertTriangle className="w-2.5 h-2.5" />
+                <span>Breaches</span>
+              </button>
+            </div>
+
+            {/* Compact Live Notification Cards List */}
+            <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+              {sortedNotificationArticles.length === 0 ? (
+                <div className="p-6 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-1">
+                  <Bell className="w-5 h-5 text-slate-300 mx-auto" />
+                  <p className="text-xs font-semibold text-slate-700">No New Alerts Matching Filter</p>
+                  <p className="text-[10px] text-slate-400">Events appear when targets publish fresh articles.</p>
+                </div>
+              ) : (
+                paginatedNotificationArticles.map((art, idx) => {
+                  const isSlaMet = !art.isBackCatalog && art.delaySec <= 300;
+                  const threatRating = art.threatRating || art.analysis?.threatRating || 'Low';
+
+                  return (
+                    <div
+                      key={art.id || `notif-${idx}`}
+                      className="p-3 rounded-xl bg-slate-50/70 hover:bg-indigo-50/40 border border-slate-200/90 hover:border-indigo-300 transition-all space-y-2 shadow-2xs group"
+                    >
+                      <div className="flex items-center justify-between gap-1 text-[10px] font-telemetry-mono">
+                        <span className="font-bold text-slate-900 truncate max-w-[150px]">
+                          {art.competitor}
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-bold ${
+                            art.isBackCatalog
+                              ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                              : isSlaMet
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : 'bg-rose-100 text-rose-800 border border-rose-200'
+                          }`}
+                        >
+                          {art.isBackCatalog ? 'HISTORICAL' : (isSlaMet ? `⚡ ${art.delayFormatted}` : `⚠️ ${art.delayFormatted}`)}
+                        </span>
+                      </div>
+
+                      <h4
+                        onClick={() => onSelectArticle(art)}
+                        className="text-xs font-bold text-slate-900 group-hover:text-indigo-600 transition-colors cursor-pointer leading-snug line-clamp-2"
+                      >
+                        {art.title}
+                      </h4>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-[10px]">
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-bold uppercase font-telemetry-mono ${
+                            threatRating === 'High'
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : threatRating === 'Medium'
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          }`}
+                        >
+                          {threatRating} Threat
+                        </span>
+                        <button
+                          onClick={() => onSelectArticle(art)}
+                          className="text-indigo-600 hover:text-indigo-800 font-semibold flex items-center space-x-0.5 cursor-pointer"
+                        >
+                          <span>Inspect</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {sortedNotificationArticles.length > 0 && (
+              <Pagination
+                currentPage={notifPage}
+                totalItems={sortedNotificationArticles.length}
+                pageSize={notifPageSize}
+                onPageChange={setNotifPage}
+                onPageSizeChange={setNotifPageSize}
+                pageSizeOptions={[5, 10, 20, 'all']}
+                itemName="alerts"
+              />
+            )}
+          </div>
+
+          {/* 2. COMPETITOR FLEET HEALTH OVERVIEW */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <Globe className="w-4 h-4 text-indigo-600" />
+                  <h3 className="text-sm font-bold text-slate-900 font-mono-tech">
+                    Competitor Fleet Status
+                  </h3>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold font-telemetry-mono">
+                    {totalCompetitorsCount}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Target endpoints and health telemetry.
+                </p>
+              </div>
+
+              {onNavigateToCompetitors && (
+                <button
+                  onClick={onNavigateToCompetitors}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center space-x-0.5 cursor-pointer"
+                >
+                  <span>Manage</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Search within Fleet */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Filter targets..."
+                value={competitorSearch}
+                onChange={(e) => setCompetitorSearch(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-2.5 py-1 text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-indigo-500 font-telemetry-mono"
+              />
+            </div>
+
+            {/* Competitor Fleet Compact Cards */}
+            <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+              {filteredCompetitors.length === 0 ? (
+                <div className="py-6 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 text-xs text-slate-500">
+                  No competitors configured.
+                </div>
+              ) : (
+                paginatedCompetitors.map((comp) => {
+                  const isActive = comp.status === 'Active';
+                  const strategy = comp.strategy || 'Hybrid RSS+Sitemap';
+
+                  return (
+                    <div
+                      key={comp.id}
+                      className="p-3 rounded-xl bg-slate-50/70 hover:bg-slate-50 border border-slate-200 hover:border-indigo-200 transition-all space-y-1.5 shadow-2xs"
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-slate-900 leading-snug truncate">
+                            {comp.name}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 font-telemetry-mono block truncate">
+                            {comp.domain}
+                          </span>
+                        </div>
+                        <span
+                          className={`inline-flex items-center space-x-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full font-telemetry-mono shrink-0 ${
+                            isActive
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-slate-100 text-slate-600 border border-slate-200'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                          <span>{isActive ? 'Online' : 'Paused'}</span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] font-telemetry-mono text-slate-500 pt-1 border-t border-slate-200/60">
+                        <span className="text-indigo-700 font-medium truncate max-w-[130px]">{strategy}</span>
+                        {onForceCrawl && (
+                          <button
+                            onClick={() => onForceCrawl(comp)}
+                            disabled={isScanning}
+                            className="flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-2.5 h-2.5 ${isScanning ? 'animate-spin' : ''}`} />
+                            <span>Probe</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {filteredCompetitors.length > 0 && (
+              <Pagination
+                currentPage={compPage}
+                totalItems={filteredCompetitors.length}
+                pageSize={compPageSize}
+                onPageChange={setCompPage}
+                onPageSizeChange={setCompPageSize}
+                pageSizeOptions={[3, 6, 12, 'all']}
+                itemName="targets"
+              />
+            )}
+          </div>
+
+          {/* 3. LATENCY EXTREMES & METHOD EFFICIENCY */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-telemetry-mono">
@@ -1484,110 +1371,75 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+            <div className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
                 <div>
-                  <div className="text-slate-500 text-[11px]">Fastest Detection</div>
-                  <div className="font-semibold text-slate-900 truncate max-w-[180px]">
-                    {fastestArticle ? `${fastestArticle.competitor} (${fastestArticle.ingestMethod})` : 'Awaiting events'}
+                  <div className="text-slate-500 text-[10px]">Fastest Detection</div>
+                  <div className="font-semibold text-slate-900 truncate max-w-[140px] text-[11px]">
+                    {fastestArticle ? `${fastestArticle.competitor}` : 'Awaiting events'}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-emerald-600 font-bold font-telemetry-mono text-sm">
+                  <div className="text-emerald-600 font-bold font-telemetry-mono text-xs">
                     {fastestArticle ? fastestArticle.delayFormatted : '--'}
                   </div>
-                  <div className="text-[10px] text-emerald-700 font-telemetry-mono font-medium">
-                    {fastestArticle ? (fastestArticle.delaySec <= 300 ? 'SLA MET (<=5m)' : 'SLA BREACHED (>5m)') : 'Target Met'}
-                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
                 <div>
-                  <div className="text-slate-500 text-[11px]">Slowest Detection</div>
-                  <div className="font-semibold text-slate-900 truncate max-w-[180px]">
-                    {slowestArticle ? `${slowestArticle.competitor} (${slowestArticle.ingestMethod})` : 'Awaiting events'}
+                  <div className="text-slate-500 text-[10px]">Slowest Detection</div>
+                  <div className="font-semibold text-slate-900 truncate max-w-[140px] text-[11px]">
+                    {slowestArticle ? `${slowestArticle.competitor}` : 'Awaiting events'}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className={`font-bold font-telemetry-mono text-sm ${slowestArticle && slowestArticle.delaySec > 300 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  <div className={`font-bold font-telemetry-mono text-xs ${slowestArticle && slowestArticle.delaySec > 300 ? 'text-rose-600' : 'text-emerald-600'}`}>
                     {slowestArticle ? slowestArticle.delayFormatted : '--'}
                   </div>
-                  <div className={`text-[10px] font-telemetry-mono font-medium ${slowestArticle && slowestArticle.delaySec > 300 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                    {slowestArticle ? (slowestArticle.delaySec <= 300 ? 'SLA MET (<=5m)' : 'SLA BREACHED (>5m)') : 'Nominal'}
-                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-                  <div className="text-slate-500 text-[10px] uppercase font-telemetry-mono">Average (P50)</div>
-                  <div className={`text-base font-bold font-mono-tech mt-0.5 ${isAvgSlaMet ? 'text-slate-900' : 'text-rose-600'}`}>
-                    {articles.length > 0 ? avgDelay : '--'}
+              {/* Ingestion Method Efficiency Breakdown */}
+              <div className="pt-2 space-y-2 border-t border-slate-100">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 font-telemetry-mono">
+                  Method Efficiency
+                </div>
+
+                <div className="space-y-1 text-[11px]">
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span className="font-medium">RSS Feeds</span>
+                    <span className="font-telemetry-mono text-emerald-600 font-semibold">01m 18s avg</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full w-[94%]" />
                   </div>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-                  <div className="text-slate-500 text-[10px] uppercase font-telemetry-mono">SLA Compliance</div>
-                  <div className={`text-base font-bold font-mono-tech mt-0.5 ${slaCompliancePct >= 90 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {slaCompliancePct}%
+
+                <div className="space-y-1 text-[11px]">
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span className="font-medium">XML Sitemaps</span>
+                    <span className="font-telemetry-mono text-indigo-600 font-semibold">04m 12s avg</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-600 rounded-full w-[82%]" />
+                  </div>
+                </div>
+
+                <div className="space-y-1 text-[11px]">
+                  <div className="flex items-center justify-between text-slate-700">
+                    <span className="font-medium">Direct DOM Poller</span>
+                    <span className="font-telemetry-mono text-amber-700 font-semibold">06m 45s avg</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-500 rounded-full w-[65%]" />
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Card 2: Method Efficiency Breakdown */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-telemetry-mono border-b border-slate-100 pb-2">
-              Ingestion Method Efficiency
-            </h3>
-
-            <div className="space-y-3.5 text-xs">
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-slate-800">RSS Feeds</span>
-                  <span className="font-telemetry-mono text-emerald-600 font-semibold">01m 18s avg delay</span>
-                </div>
-                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full w-[94%]" />
-                </div>
-                <div className="flex justify-between text-[10px] text-slate-500 font-telemetry-mono">
-                  <span>Success Rate: 99.9%</span>
-                  <span>ETag Cache: 88%</span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-slate-800">XML Sitemaps</span>
-                  <span className="font-telemetry-mono text-indigo-600 font-semibold">04m 12s avg delay</span>
-                </div>
-                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-600 rounded-full w-[82%]" />
-                </div>
-                <div className="flex justify-between text-[10px] text-slate-500 font-telemetry-mono">
-                  <span>Success Rate: 98.4%</span>
-                  <span>LastMod Support: 80%</span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-slate-800">Direct DOM Poller</span>
-                  <span className="font-telemetry-mono text-amber-700 font-semibold">06m 45s avg delay</span>
-                </div>
-                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-amber-500 rounded-full w-[65%]" />
-                </div>
-                <div className="flex justify-between text-[10px] text-slate-500 font-telemetry-mono">
-                  <span>Success Rate: 95.2%</span>
-                  <span>Diff Hasher: Active</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: Real-Time Event Stream Terminal */}
+          {/* 4. REAL-TIME EVENT STREAM TERMINAL */}
           <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-inner space-y-3 font-telemetry-mono">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <div className="flex items-center space-x-2 text-xs text-slate-300">
@@ -1606,7 +1458,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-2 text-[11px] max-h-60 overflow-y-auto pr-1">
+            <div className="space-y-2 text-[11px] max-h-56 overflow-y-auto pr-1">
               {logs.length === 0 ? (
                 <div className="text-slate-500 py-6 text-center text-[10px]">
                   [sys] Database connected. Waiting for crawler activity or test publication...

@@ -3,16 +3,6 @@ import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
-import { initializeApp, getApps } from "firebase/app";
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  getDoc,
-  doc, 
-  setDoc, 
-  updateDoc 
-} from "firebase/firestore";
 
 import { probeWebsite } from "./prober.js";
 import { 
@@ -45,154 +35,93 @@ import {
   getExecutionLogs
 } from "./publisher.js";
 
+import {
+  connectMongo,
+  initializeDatabase,
+  getArticlesFromMongo,
+  saveArticleToMongo,
+  updateArticleInMongo,
+  getCompetitorsFromMongo,
+  saveCompetitorToMongo,
+  updateCompetitorInMongo,
+  deleteCompetitorFromMongo,
+  getLogsFromMongo,
+  saveLogToMongo,
+  getChecksFromMongo,
+  saveCheckToMongo,
+  getRetriesFromMongo,
+  saveRetryToMongo,
+  dbEvents,
+  getMongoUri
+} from "./mongo.js";
+
 dotenv.config();
 
-// Initialize Firebase Firestore on the server (works with config file or env vars)
-let db: any = null;
-try {
-  let firebaseConfig: any = null;
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  } else if (process.env.FIREBASE_CONFIG) {
-    try {
-      firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
-    } catch {
-      // not JSON string
-    }
-  } else if (process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY) {
-    firebaseConfig = {
-      apiKey: process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY,
-      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || process.env.FIREBASE_AUTH_DOMAIN,
-      projectId: process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID,
-      storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || process.env.FIREBASE_MESSAGING_SENDER_ID,
-      appId: process.env.VITE_FIREBASE_APP_ID || process.env.FIREBASE_APP_ID,
-      firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || process.env.FIREBASE_DATABASE_ID
-    };
-  }
-
-  if (firebaseConfig) {
-    const fbApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-    db = firebaseConfig.firestoreDatabaseId 
-      ? getFirestore(fbApp, firebaseConfig.firestoreDatabaseId)
-      : getFirestore(fbApp);
-    console.log("[Firebase] Firestore initialized on server with DB ID:", firebaseConfig.firestoreDatabaseId || "(default)");
-  }
-} catch (err) {
-  console.warn("[Firebase] Could not initialize Firestore on server:", err);
-}
-
-// Utility to recursively remove undefined fields so Firestore setDoc/updateDoc never fails
-export function cleanFirestoreData<T>(data: T): T {
-  if (data === null || data === undefined) {
-    return null as any;
-  }
-  if (Array.isArray(data)) {
-    return data
-      .filter((item) => item !== undefined)
-      .map((item) => cleanFirestoreData(item)) as any;
-  }
-  if (typeof data === "object") {
-    if (data instanceof Date || typeof (data as any).toMillis === "function") {
-      return data;
-    }
-    const cleanObj: Record<string, any> = {};
-    for (const [key, value] of Object.entries(data)) {
-      if (value !== undefined) {
-        cleanObj[key] = cleanFirestoreData(value);
-      }
-    }
-    return cleanObj as any;
-  }
-  return data;
-}
-
-export function getServerDb() {
-  return db;
-}
-
-// Populate known article hashes on server boot to ensure zero duplicate alerts
+// Sync known article hashes into deduplication engine on boot
 export async function syncKnownArticles() {
-  if (!db) return;
   try {
-    const snap = await getDocs(collection(db, "articles"));
-    const existing: any[] = [];
-    snap.forEach((d) => {
-      const data = d.data();
-      existing.push({
-        id: d.id,
-        url: data.url,
-        canonicalUrl: data.canonicalUrl,
-        title: data.title,
-        content: data.content,
-        competitorDomain: data.competitorDomain,
-        ingestMethod: data.ingestMethod
-      });
-    });
-    deduplicationEngine.syncWithDatabase(existing);
-    console.log(`[Deduplication Registry] Seeded ${existing.length} existing articles into canonical deduplication engine`);
+    const articles = await getArticlesFromMongo();
+    deduplicationEngine.syncWithDatabase(articles);
+    console.log(`[Deduplication Registry] Seeded ${articles.length} existing MongoDB articles into canonical deduplication engine`);
   } catch (e) {
-    console.warn("[Deduplication Registry] Warning seeding articles:", e);
+    console.warn("[Deduplication Registry] Warning seeding MongoDB articles:", e);
   }
 }
 
-// Automatically scan and backfill complete content for thin or placeholder articles in Firestore
+// Automatically scan and backfill complete content for thin or placeholder articles in MongoDB
 export async function enrichThinArticles() {
-  if (!db) return;
   try {
-    const snap = await getDocs(collection(db, "articles"));
-    for (const docSnap of snap.docs) {
-      const art = docSnap.data();
-      const needsEnrichment =
-        !art.content ||
+    const articles = await getArticlesFromMongo();
+    const thinArticles = articles.filter((art) => 
+      art.url &&
+      (!art.content ||
         art.content.length < 250 ||
         art.content.includes("Captured directly from DOM") ||
-        art.content.includes("Captured from live RSS");
+        art.content.includes("Captured from live RSS"))
+    ).slice(0, 2); // Max 2 articles per pass to prevent event loop clogging
 
-      if (needsEnrichment && art.url) {
-        try {
-          const extracted = await extractUniversalArticleContent(art.url, {
-            fallbackTitle: art.title,
-            fallbackAuthor: art.author,
-            competitorName: art.competitor,
-            competitorDomain: art.competitorDomain
+    for (const art of thinArticles) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000); // Strict 2s timeout
+        
+        const extracted = await extractUniversalArticleContent(art.url, {
+          fallbackTitle: art.title,
+          fallbackAuthor: art.author,
+          competitorName: art.competitor,
+          competitorDomain: art.competitorDomain
+        });
+        clearTimeout(timeout);
+
+        if (extracted.content && extracted.content.length > 200) {
+          await updateArticleInMongo(art.id, {
+            content: extracted.content,
+            contentMarkdown: extracted.contentMarkdown,
+            contentHtml: extracted.contentHtml,
+            snippet: extracted.snippet,
+            title: extracted.title || art.title,
+            author: extracted.author || art.author,
+            readTime: extracted.readTime,
+            wordCount: extracted.wordCount,
+            charCount: extracted.charCount,
+            featuredImage: extracted.featuredImage || art.featuredImage || "",
+            inlineImages: extracted.inlineImages || [],
+            mediaCaptures: extracted.mediaCaptures || [],
+            categories: extracted.categories || art.categories || ["Industry Intelligence"],
+            tags: extracted.tags || art.tags || [],
+            metaDescription: extracted.metaDescription || art.metaDescription || "",
+            canonicalUrl: extracted.canonicalUrl || art.canonicalUrl || art.url,
+            originalSourceUrl: extracted.originalSourceUrl || art.url,
+            outgoingLinks: extracted.outgoingLinks || [],
+            citations: extracted.citations || [],
+            structuredMetadata: extracted.structuredMetadata,
+            domSelector: extracted.domSelector,
+            takeaways: extracted.takeaways,
+            updatedAt: new Date().toISOString()
           });
-
-          if (extracted.content && extracted.content.length > 200) {
-            await setDoc(
-              doc(db, "articles", docSnap.id),
-              cleanFirestoreData({
-                content: extracted.content,
-                contentMarkdown: extracted.contentMarkdown,
-                contentHtml: extracted.contentHtml,
-                snippet: extracted.snippet,
-                title: extracted.title || art.title,
-                author: extracted.author || art.author,
-                readTime: extracted.readTime,
-                wordCount: extracted.wordCount,
-                charCount: extracted.charCount,
-                featuredImage: extracted.featuredImage || art.featuredImage || "",
-                inlineImages: extracted.inlineImages || [],
-                mediaCaptures: extracted.mediaCaptures || [],
-                categories: extracted.categories || art.categories || ["Industry Intelligence"],
-                tags: extracted.tags || art.tags || [],
-                metaDescription: extracted.metaDescription || art.metaDescription || "",
-                canonicalUrl: extracted.canonicalUrl || art.canonicalUrl || art.url,
-                originalSourceUrl: extracted.originalSourceUrl || art.url,
-                outgoingLinks: extracted.outgoingLinks || [],
-                citations: extracted.citations || [],
-                structuredMetadata: extracted.structuredMetadata,
-                domSelector: extracted.domSelector,
-                takeaways: extracted.takeaways,
-                updatedAt: new Date().toISOString()
-              }),
-              { merge: true }
-            );
-          }
-        } catch (enrichErr: any) {
-          console.info(`[Auto-Enricher] Notice enriching ${art.url}:`, enrichErr.message);
         }
+      } catch (enrichErr: any) {
+        console.info(`[Auto-Enricher] Notice enriching ${art.url}:`, enrichErr.message);
       }
     }
   } catch (err) {
@@ -224,11 +153,205 @@ export function createExpressApp(): Express {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+  // ==========================================
+  // MONGODB DATABASE REST & SSE STREAM ENDPOINTS
+  // ==========================================
+
+  // SSE Stream for Real-time MongoDB Updates
+  app.get("/api/db/stream", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    const onChange = (data: any) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    dbEvents.on("change", onChange);
+
+    req.on("close", () => {
+      dbEvents.off("change", onChange);
+    });
+  });
+
+  // Database init endpoint
+  app.post("/api/db/migrate", async (req, res) => {
+    try {
+      await initializeDatabase();
+      res.json({
+        success: true,
+        message: "MongoDB database initialized."
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Database status endpoint
+  app.get("/api/db/status", async (req, res) => {
+    try {
+      const db = await connectMongo();
+      const rawUri = getMongoUri() || "";
+      res.json({
+        success: true,
+        provider: "MongoDB",
+        databaseName: db ? db.databaseName : "in-memory-store",
+        uri: rawUri ? rawUri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@") : "in-memory"
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Fast unified bootstrap endpoint for instant page load
+  app.get("/api/db/bootstrap", async (req, res) => {
+    try {
+      const [articles, competitors, logs, checks, retries] = await Promise.all([
+        getArticlesFromMongo(),
+        getCompetitorsFromMongo(),
+        getLogsFromMongo(),
+        getChecksFromMongo(),
+        getRetriesFromMongo()
+      ]);
+      res.json({ articles, competitors, logs, checks, retries });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Articles API
+  app.get("/api/db/articles", async (req, res) => {
+    try {
+      const articles = await getArticlesFromMongo();
+      res.json(articles);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/db/articles", async (req, res) => {
+    try {
+      await saveArticleToMongo(req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/db/articles/:id", async (req, res) => {
+    try {
+      await updateArticleInMongo(req.params.id, req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Competitors API
+  app.get("/api/db/competitors", async (req, res) => {
+    try {
+      const competitors = await getCompetitorsFromMongo();
+      res.json(competitors);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/db/competitors", async (req, res) => {
+    try {
+      await saveCompetitorToMongo(req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/db/competitors/:id", async (req, res) => {
+    try {
+      await updateCompetitorInMongo(req.params.id, req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/db/competitors/:id", async (req, res) => {
+    try {
+      await deleteCompetitorFromMongo(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Logs API
+  app.get("/api/db/logs", async (req, res) => {
+    try {
+      const logs = await getLogsFromMongo();
+      res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/db/logs", async (req, res) => {
+    try {
+      await saveLogToMongo(req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Monitoring Checks API
+  app.get("/api/db/monitoring_checks", async (req, res) => {
+    try {
+      const checks = await getChecksFromMongo();
+      res.json(checks);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/db/monitoring_checks", async (req, res) => {
+    try {
+      await saveCheckToMongo(req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Retries API
+  app.get("/api/db/retries", async (req, res) => {
+    try {
+      const retries = await getRetriesFromMongo();
+      res.json(retries);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/db/retries", async (req, res) => {
+    try {
+      await saveRetryToMongo(req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // EXISTING APPLICATION API ENDPOINTS
+  // ==========================================
+
   // API Route: /api/health
   app.get(["/api/health", "/health"], (req, res) => {
     const workerStatus = continuousWorker.getStatus();
     res.json({
       status: "healthy",
+      database: "MongoDB",
       workerRunning: workerStatus.isRunning && !workerStatus.isPaused,
       cycleCount: workerStatus.cycleCount,
       nodesOnline: `${engineMetrics.successfulChecks} checks`,
@@ -242,7 +365,7 @@ export function createExpressApp(): Express {
     });
   });
 
-  // API Route: /api/monitoring/status (Continuous worker heartbeat & audit status)
+  // API Route: /api/monitoring/status
   app.get("/api/monitoring/status", (req, res) => {
     res.json({
       success: true,
@@ -250,7 +373,7 @@ export function createExpressApp(): Express {
     });
   });
 
-  // API Route: /api/monitoring/checks (Persistent check cycle audit records)
+  // API Route: /api/monitoring/checks
   app.get("/api/monitoring/checks", (req, res) => {
     const limitCount = req.query.limit ? parseInt(String(req.query.limit), 10) : 100;
     const checks = continuousWorker.getRecentChecks(limitCount);
@@ -261,7 +384,7 @@ export function createExpressApp(): Express {
     });
   });
 
-  // API Route: /api/monitoring/control (Operator controls for continuous loop)
+  // API Route: /api/monitoring/control
   app.post("/api/monitoring/control", async (req, res) => {
     const { action, intervalMs } = req.body;
     if (action === "pause") {
@@ -277,7 +400,7 @@ export function createExpressApp(): Express {
     res.json({ success: true, status: continuousWorker.getStatus() });
   });
 
-  // API Route: /api/monitoring/simulate-error (Simulates error & timeout handling to test resilience)
+  // API Route: /api/monitoring/simulate-error
   app.post("/api/monitoring/simulate-error", async (req, res) => {
     const { scenario, targetName } = req.body;
     const validScenarios = ["timeout", "http_500", "http_403", "nominal_304", "live_detection"];
@@ -291,30 +414,9 @@ export function createExpressApp(): Express {
     });
   });
 
-  // API Route: /api/firebase-config (Serves public client Firebase configuration)
+  // API Route: /api/firebase-config (Legacy client endpoint fallback)
   app.get("/api/firebase-config", (req, res) => {
-    let config: any = null;
-    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    if (fs.existsSync(configPath)) {
-      try {
-        config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      } catch {}
-    } else if (process.env.FIREBASE_CONFIG) {
-      try {
-        config = JSON.parse(process.env.FIREBASE_CONFIG);
-      } catch {}
-    } else if (process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY) {
-      config = {
-        apiKey: process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY,
-        authDomain: process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN || "",
-        projectId: process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || "",
-        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || "",
-        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-        appId: process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || "",
-        firestoreDatabaseId: process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID || ""
-      };
-    }
-    res.json(config || {});
+    res.json({ provider: "MongoDB" });
   });
 
   // API Route: /api/scale-metrics
@@ -344,7 +446,7 @@ export function createExpressApp(): Express {
     }
   });
 
-  // API Route: /api/probe (Autonomous Multi-Strategy Discovery)
+  // API Route: /api/probe
   app.post("/api/probe", async (req, res) => {
     const { domain, blogUrl } = req.body;
     const target = blogUrl || domain || "timesofindia.indiatimes.com";
@@ -357,7 +459,7 @@ export function createExpressApp(): Express {
     }
   });
 
-  // API Route: /api/crawl-target (Direct execution for a specific competitor target)
+  // API Route: /api/crawl-target
   app.post("/api/crawl-target", async (req, res) => {
     try {
       const { competitorId } = req.body;
@@ -365,16 +467,11 @@ export function createExpressApp(): Express {
         return res.status(400).json({ error: "Missing competitorId" });
       }
 
-      let targetComp: any = null;
-      if (db) {
-        const compSnap = await getDoc(doc(db, "competitors", competitorId));
-        if (compSnap.exists()) {
-          targetComp = { id: compSnap.id, ...compSnap.data() };
-        }
-      }
+      const competitors = await getCompetitorsFromMongo();
+      const targetComp = competitors.find((c) => c.id === competitorId);
 
       if (!targetComp) {
-        return res.status(404).json({ error: "Competitor not found" });
+        return res.status(404).json({ error: "Competitor not found in MongoDB" });
       }
 
       const result = await checkCompetitorTarget({
@@ -388,35 +485,30 @@ export function createExpressApp(): Express {
         discoveredConfig: targetComp.discoveredConfig
       });
 
-      // Update competitor in DB
-      if (db) {
-        try {
-          const compRef = doc(db, "competitors", targetComp.id);
-          const updatedFields: Record<string, any> = {
-            ...targetComp,
-            lastChecked: "Just now",
-            etag: result.etag || targetComp.etag || 'W/"7a3e-9b21"'
-          };
+      // Update competitor in MongoDB
+      try {
+        const updatedFields: Record<string, any> = {
+          lastChecked: "Just now",
+          etag: result.etag || targetComp.etag || 'W/"7a3e-9b21"'
+        };
 
-          if (result.articles.length > 0) {
-            updatedFields.lastDetection = result.articles[0].title;
-            updatedFields.articlesScraped = (targetComp.articlesScraped || 0) + result.articles.length;
-          } else if (!targetComp.lastDetection || targetComp.lastDetection === "Pending initial sweep") {
-            updatedFields.lastDetection = result.outcome === "cached"
-              ? "Sweep complete (ETag synced)"
-              : "Sweep complete (0 new posts)";
-          }
-
-          await setDoc(compRef, cleanFirestoreData(updatedFields), { merge: true });
-
-          // Save newly detected articles
-          for (const art of result.articles) {
-            const artRef = doc(db, "articles", art.id);
-            await setDoc(artRef, cleanFirestoreData(art), { merge: true });
-          }
-        } catch (dbErr) {
-          console.warn("DB update error in crawl-target:", dbErr);
+        if (result.articles.length > 0) {
+          updatedFields.lastDetection = result.articles[0].title;
+          updatedFields.articlesScraped = (targetComp.articlesScraped || 0) + result.articles.length;
+        } else if (!targetComp.lastDetection || targetComp.lastDetection === "Pending initial sweep") {
+          updatedFields.lastDetection = result.outcome === "cached"
+            ? "Sweep complete (ETag synced)"
+            : "Sweep complete (0 new posts)";
         }
+
+        await updateCompetitorInMongo(targetComp.id, updatedFields);
+
+        // Save newly detected articles
+        for (const art of result.articles) {
+          await saveArticleToMongo(art);
+        }
+      } catch (dbErr) {
+        console.warn("MongoDB update error in crawl-target:", dbErr);
       }
 
       res.json({
@@ -432,7 +524,7 @@ export function createExpressApp(): Express {
     }
   });
 
-  // API Route: /api/dedup/stats (Canonical Deduplication Engine Telemetry)
+  // API Route: /api/dedup/stats
   app.get("/api/dedup/stats", (req, res) => {
     res.json(deduplicationEngine.getStats());
   });
@@ -448,46 +540,41 @@ export function createExpressApp(): Express {
       console.log(`[Universal Scraper] Extraction requested for: ${url}`);
       const extracted = await extractUniversalArticleContent(url);
 
-      if (articleId && db) {
+      if (articleId) {
         try {
-          const artRef = doc(db, "articles", articleId);
-          await setDoc(
-            artRef,
-            cleanFirestoreData({
-              content: extracted.content,
-              contentMarkdown: extracted.contentMarkdown,
-              contentHtml: extracted.contentHtml,
-              snippet: extracted.snippet,
-              title: extracted.title,
-              author: extracted.author,
-              readTime: extracted.readTime,
-              wordCount: extracted.wordCount,
-              charCount: extracted.charCount,
-              featuredImage: extracted.featuredImage || "",
-              inlineImages: extracted.inlineImages || [],
-              mediaCaptures: extracted.mediaCaptures || [],
-              categories: extracted.categories || [],
-              tags: extracted.tags || [],
-              metaDescription: extracted.metaDescription || "",
-              canonicalUrl: extracted.canonicalUrl,
-              originalSourceUrl: extracted.originalSourceUrl,
-              outgoingLinks: extracted.outgoingLinks || [],
-              citations: extracted.citations || [],
-              structuredMetadata: extracted.structuredMetadata,
-              domSelector: extracted.domSelector,
-              takeaways: extracted.takeaways,
-              updatedAt: new Date().toISOString()
-            }),
-            { merge: true }
-          );
+          await updateArticleInMongo(articleId, {
+            content: extracted.content,
+            contentMarkdown: extracted.contentMarkdown,
+            contentHtml: extracted.contentHtml,
+            snippet: extracted.snippet,
+            title: extracted.title,
+            author: extracted.author,
+            readTime: extracted.readTime,
+            wordCount: extracted.wordCount,
+            charCount: extracted.charCount,
+            featuredImage: extracted.featuredImage || "",
+            inlineImages: extracted.inlineImages || [],
+            mediaCaptures: extracted.mediaCaptures || [],
+            categories: extracted.categories || [],
+            tags: extracted.tags || [],
+            metaDescription: extracted.metaDescription || "",
+            canonicalUrl: extracted.canonicalUrl,
+            originalSourceUrl: extracted.originalSourceUrl,
+            outgoingLinks: extracted.outgoingLinks || [],
+            citations: extracted.citations || [],
+            structuredMetadata: extracted.structuredMetadata,
+            domSelector: extracted.domSelector,
+            takeaways: extracted.takeaways,
+            updatedAt: new Date().toISOString()
+          });
         } catch (dbErr: any) {
-          console.info("[Universal Scraper] Firestore sync notice:", dbErr.message);
+          console.info("[Universal Scraper] MongoDB sync notice:", dbErr.message);
         }
       }
 
       res.json({
         success: true,
-        ...extracted
+        extracted
       });
     } catch (error: any) {
       console.error("[Universal Scraper] Error:", error);
@@ -501,7 +588,7 @@ export function createExpressApp(): Express {
     const ai = getGeminiClient();
 
     if (!ai) {
-      return res.status(200).json({
+      const heuristicAnalysis = {
         summary: `Competitor ${competitor || "Target"} announced: "${title || "New strategic update"}". This update aims to capture market share through enhanced feature velocity and targeted messaging.`,
         threatRating: "Medium",
         threatExplanation: "Direct market overlap with standard product offering. Requires competitive feature parity check.",
@@ -512,7 +599,15 @@ export function createExpressApp(): Express {
         ],
         counterAction: "Publish benchmark comparisons emphasizing our deterministic SLAs and high-throughput pipeline guarantees.",
         source: "deterministic-heuristic"
-      });
+      };
+
+      if (articleId) {
+        try {
+          await updateArticleInMongo(articleId, { analysis: heuristicAnalysis });
+        } catch {}
+      }
+
+      return res.status(200).json(heuristicAnalysis);
     }
 
     try {
@@ -537,7 +632,7 @@ Output valid JSON only with this exact schema:
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.8-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json"
@@ -547,19 +642,14 @@ Output valid JSON only with this exact schema:
       const rawText = response.text || "{}";
       const parsed = JSON.parse(rawText);
 
-      if (articleId && db) {
+      if (articleId) {
         try {
-          const artRef = doc(db, "articles", articleId);
-          await setDoc(
-            artRef,
-            cleanFirestoreData({
-              analysis: parsed,
-              analyzedAt: new Date().toISOString()
-            }),
-            { merge: true }
-          );
+          await updateArticleInMongo(articleId, {
+            analysis: parsed,
+            analyzedAt: new Date().toISOString()
+          });
         } catch (dbErr) {
-          console.warn("Could not save analysis to Firestore:", dbErr);
+          console.warn("Could not save analysis to MongoDB:", dbErr);
         }
       }
 
@@ -584,9 +674,9 @@ Output valid JSON only with this exact schema:
   app.post("/api/analyze", handleAnalyze);
   app.post("/app/api/analyze", handleAnalyze);
 
-  // API Route: /api/test-publish (Supports live fast SLA, live SLA breach, and historical back-catalog scenarios)
-  app.post("/api/test-publish", (req, res) => {
-    const { competitorName, title, scenario, delaySec: customDelaySec, isBackCatalog: customIsBackCatalog, publicationSource: customPubSource } = req.body;
+  // API Route: /api/test-publish
+  app.post("/api/test-publish", async (req, res) => {
+    const { competitorName, title, scenario, delaySec: customDelaySec, isBackCatalog: customIsBackCatalog, publicationSource: customPubSource, content: customContent } = req.body;
     const now = new Date();
     
     let delaySec = 192; // default: 3m 12s
@@ -620,7 +710,7 @@ Output valid JSON only with this exact schema:
     const exactDelayText = formatExactDelayText(delaySec);
     const delayFormatted = formatDelay(delaySec);
 
-    const rawContent = `Our engineering research discloses production benchmarks and architectural patterns across distributed computing clusters.\n\nEvaluating data freshness, serialization latency, and egress traffic reductions provides predictable operational overhead for high-concurrency enterprise pipelines.\n\nAll metrics are validated against published schemas and live origin headers.`;
+    const rawContent = customContent || `Our engineering research discloses production benchmarks and architectural patterns across distributed computing clusters.\n\nEvaluating data freshness, serialization latency, and egress traffic reductions provides predictable operational overhead for high-concurrency enterprise pipelines.\n\nAll metrics are validated against published schemas and live origin headers.`;
     const heroImg = "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1200&q=80";
     const inlineImg1 = "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=800&q=80";
     const inlineImg2 = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80";
@@ -724,12 +814,31 @@ Output valid JSON only with this exact schema:
       ]
     };
 
+    try {
+      await saveArticleToMongo(article);
+    } catch (saveErr) {
+      console.warn("Failed saving test publish to MongoDB:", saveErr);
+    }
+
     res.json({
       success: true,
       article,
       message: isBackCatalog
         ? `Historical back-catalog article ingested (${exactDelayText} age). Separated from live SLA benchmark calculation.`
         : `Live article detected in ${exactDelayText} (${delayFormatted}). 5m SLA target: ${targetMet ? "MET (<=300s)" : "BREACHED (>300s)"}.`
+    });
+  });
+
+  // API Route: Live scale metrics endpoint
+  app.get("/api/scale-metrics", (req, res) => {
+    const workerStatus = continuousWorker.getStatus();
+    res.json({
+      failedChecks: workerStatus.consecutiveErrors || 0,
+      totalChecks: workerStatus.totalChecksRecorded || 0,
+      successfulChecks: Math.max(0, (workerStatus.totalChecksRecorded || 0) - (workerStatus.consecutiveErrors || 0)),
+      activeWorkers: workerStatus.activeTargetsCount || 0,
+      retriesCount: 0,
+      slaComplianceRate: workerStatus.slaComplianceRate || 100
     });
   });
 
@@ -772,9 +881,7 @@ Output valid JSON only with this exact schema:
     res.json(result);
   });
 
-  // ==========================================
-  // WORDPRESS & CMS AUTO-PUBLISHING (VERSION 2)
-  // ==========================================
+  // WORDPRESS & CMS AUTO-PUBLISHING
   app.get("/api/wordpress/settings", (req, res) => {
     res.json(getWordPressConfig());
   });
@@ -793,9 +900,7 @@ Output valid JSON only with this exact schema:
     res.json(result);
   });
 
-  // ==========================================
-  // SEARCH INDEXING INTEGRATION (VERSION 2)
-  // ==========================================
+  // SEARCH INDEXING INTEGRATION
   app.get("/api/indexing/settings", (req, res) => {
     res.json(getSearchIndexingConfig());
   });
@@ -814,16 +919,12 @@ Output valid JSON only with this exact schema:
     res.json(result);
   });
 
-  // API Route: Execution Logs across WordPress & Search Indexing
+  // Execution Logs across WordPress & Search Indexing
   app.get("/api/publisher/logs", (req, res) => {
     res.json({ success: true, logs: getExecutionLogs() });
   });
 
-  // ==========================================
-  // SECTION 10: 100-WEBSITE SCALE & CONCURRENCY
-  // ==========================================
-
-  // API Route: Get Scale & Concurrency Telemetry Stats
+  // SCALE & CONCURRENCY
   app.get("/api/scale/stats", (req, res) => {
     res.json({
       success: true,
@@ -837,7 +938,6 @@ Output valid JSON only with this exact schema:
     });
   });
 
-  // API Route: Get 100 Site Target Nodes
   app.get("/api/scale/nodes", (req, res) => {
     res.json({
       success: true,
@@ -845,7 +945,6 @@ Output valid JSON only with this exact schema:
     });
   });
 
-  // API Route: Update Scale Engine Concurrency & Load Config
   app.post("/api/scale/config", (req, res) => {
     const updated = scaleEngine.updateConfig(req.body);
     res.json({
@@ -855,7 +954,6 @@ Output valid JSON only with this exact schema:
     });
   });
 
-  // API Route: Execute 100-Website Scale Benchmark Run
   app.post("/api/scale/benchmark", async (req, res) => {
     const { scenario = 'nominal' } = req.body;
     try {

@@ -49,6 +49,13 @@ interface PublishExecutionLogItem {
 export const IntegrationsView: React.FC = () => {
   const [subTab, setSubTab] = useState<'smtp' | 'wordpress' | 'indexing' | 'webhooks' | 'crawler'>('wordpress');
 
+  // Auto-reset scroll to top on sub-tab navigation
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+    const scrollables = document.querySelectorAll<HTMLElement>('.overflow-y-auto, .overflow-auto, .overflow-y-scroll');
+    scrollables.forEach(el => { el.scrollTop = 0; });
+  }, [subTab]);
+
   // SMTP state
   const [smtp, setSmtp] = useState<SmtpConfig>({
     host: 'smtp.postmarkapp.com',

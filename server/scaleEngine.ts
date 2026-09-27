@@ -1,7 +1,6 @@
 import { EventEmitter } from "events";
 import { normalizeCanonicalUrl, deduplicationEngine } from "./deduplicator.js";
-import { getServerDb, cleanFirestoreData } from "./app.js";
-import { doc, setDoc } from "firebase/firestore";
+import { saveArticleToMongo, saveLogToMongo } from "./mongo.js";
 
 export interface ScaleNodeState {
   id: number;
@@ -648,22 +647,18 @@ export class ScaleConcurrencyEngine extends EventEmitter {
       zeroDuplicateGuarantee: true
     };
 
-    // Record telemetry log in Firestore if available
-    const db = getServerDb();
-    if (db) {
-      try {
-        const logRef = doc(db, "logs", `log-${Date.now()}-scale-bench`);
-        await setDoc(logRef, cleanFirestoreData({
-          id: logRef.id,
-          timestamp: new Date().toISOString().split("T")[1].slice(0, 12),
-          level: "success",
-          source: "scale-benchmark-engine",
-          message: `100-Website Scale Benchmark completed [${scenario.toUpperCase()}]: ${total} sites polled at ${concurrency}x concurrency in ${totalElapsedMs}ms (${throughput} targets/sec). Duplicates blocked: ${duplicatesBlocked}. Zero-leakage verified.`,
-          durationMs: totalElapsedMs,
-          createdAt: new Date().toISOString()
-        }));
-      } catch {}
-    }
+    // Record telemetry log in MongoDB
+    try {
+      await saveLogToMongo({
+        id: `log-${Date.now()}-scale-bench`,
+        timestamp: new Date().toISOString().split("T")[1].slice(0, 12),
+        level: "success",
+        source: "scale-benchmark-engine",
+        message: `100-Website Scale Benchmark completed [${scenario.toUpperCase()}]: ${total} sites polled at ${concurrency}x concurrency in ${totalElapsedMs}ms (${throughput} targets/sec). Duplicates blocked: ${duplicatesBlocked}. Zero-leakage verified.`,
+        durationMs: totalElapsedMs,
+        createdAt: new Date().toISOString()
+      });
+    } catch {}
 
     return summaryReport;
   }
@@ -692,43 +687,39 @@ export class ScaleConcurrencyEngine extends EventEmitter {
       const target = REAL_100_BLOGS[node.id - 1] || REAL_100_BLOGS.find(b => b.domain === node.domain) || REAL_100_BLOGS[0];
       const realProbe = await probeRealBlogTarget(target.url, target.domain);
 
-      // If we got a successful 200 response with a headline and DB is available, record it
+      // If we got a successful 200 response with a headline, record it in MongoDB
       if (realProbe.statusCode === 200 && realProbe.latestTitle) {
-        const db = getServerDb();
-        if (db) {
-          try {
-            const artId = `art-real-${node.id}-${Date.now().toString(36)}`;
-            const artRef = doc(db, "articles", artId);
-            await setDoc(artRef, cleanFirestoreData({
-              id: artId,
-              competitor: target.name,
-              competitorDomain: target.domain,
-              title: realProbe.latestTitle,
-              snippet: `Extracted live via real network crawl from ${target.url} (${realProbe.articlesFound} items discovered).`,
-              content: `Live real-world crawl captured article from ${target.name} (${target.domain}).\n\nDirect network probe completed in ${realProbe.latencyMs}ms with HTTP status ${realProbe.statusCode}.\n\nSource: ${target.url}`,
-              author: `${target.name} Staff`,
-              readTime: "3 min read",
-              url: target.url,
-              canonicalUrl: target.url,
-              publishedAt: new Date().toLocaleTimeString(),
-              discoveredAt: new Date().toLocaleTimeString(),
-              delaySec: Math.floor(realProbe.latencyMs / 10),
-              delayFormatted: `${Math.round(realProbe.latencyMs)}ms roundtrip`,
-              exactDelayText: `${realProbe.latencyMs}ms (Live Web Probe)`,
-              targetMet: true,
-              ingestMethod: target.strategy === 'RSS Stream' ? 'RSS Feed' : target.strategy === 'Sitemap Index' ? 'XML Sitemap' : 'Direct DOM Poller',
-              diffPayload: `+${realProbe.bandwidthBytes}B`,
-              tags: ['Live Web Scrape', '100-Blog Fleet', target.name],
-              threatRating: 'Medium',
-              domSelector: 'article, .blog-post, .entry',
-              takeaways: [
-                { label: 'Real Network Roundtrip', value: `${realProbe.latencyMs}ms live latency`, type: 'metric' },
-                { label: 'Live Ingest Vector', value: target.strategy, type: 'launch' }
-              ],
-              citations: [{ text: `${target.name} Blog`, url: target.url }]
-            }), { merge: true });
-          } catch {}
-        }
+        try {
+          const artId = `art-real-${node.id}-${Date.now().toString(36)}`;
+          await saveArticleToMongo({
+            id: artId,
+            competitor: target.name,
+            competitorDomain: target.domain,
+            title: realProbe.latestTitle,
+            snippet: `Extracted live via real network crawl from ${target.url} (${realProbe.articlesFound} items discovered).`,
+            content: `Live real-world crawl captured article from ${target.name} (${target.domain}).\n\nDirect network probe completed in ${realProbe.latencyMs}ms with HTTP status ${realProbe.statusCode}.\n\nSource: ${target.url}`,
+            author: `${target.name} Staff`,
+            readTime: "3 min read",
+            url: target.url,
+            canonicalUrl: target.url,
+            publishedAt: new Date().toLocaleTimeString(),
+            discoveredAt: new Date().toLocaleTimeString(),
+            delaySec: Math.floor(realProbe.latencyMs / 10),
+            delayFormatted: `${Math.round(realProbe.latencyMs)}ms roundtrip`,
+            exactDelayText: `${realProbe.latencyMs}ms (Live Web Probe)`,
+            targetMet: true,
+            ingestMethod: target.strategy === 'RSS Stream' ? 'RSS Feed' : target.strategy === 'Sitemap Index' ? 'XML Sitemap' : 'Direct DOM Poller',
+            diffPayload: `+${realProbe.bandwidthBytes}B`,
+            tags: ['Live Web Scrape', '100-Blog Fleet', target.name],
+            threatRating: 'Medium',
+            domSelector: 'article, .blog-post, .entry',
+            takeaways: [
+              { label: 'Real Network Roundtrip', value: `${realProbe.latencyMs}ms live latency`, type: 'metric' },
+              { label: 'Live Ingest Vector', value: target.strategy, type: 'launch' }
+            ],
+            citations: [{ text: `${target.name} Blog`, url: target.url }]
+          });
+        } catch {}
       }
 
       return {

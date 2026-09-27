@@ -1,6 +1,4 @@
-import { getServerDb, cleanFirestoreData } from "./app.js";
-import { doc, setDoc } from "firebase/firestore";
-import crypto from "crypto";
+import { saveLogToMongo } from "./mongo.js";
 
 export interface WordPressConfig {
   endpoint: string;
@@ -136,7 +134,6 @@ export async function publishToWordPress(article: {
 }): Promise<{ success: boolean; data?: any; error?: string; log: PublishExecutionLog }> {
   const startTime = Date.now();
   const targetStatus = article.status || currentWpConfig.defaultStatus || 'draft';
-  const postUrl = currentWpConfig.endpoint || 'https://mycompany.com/wp-json/wp/v2/posts';
 
   // Build formatted content with attribution disclaimer
   let postContent = article.content || article.snippet || '';
@@ -193,7 +190,6 @@ export async function publishToWordPress(article: {
         externalPostId = String(resJson.id || externalPostId);
         externalPostUrl = resJson.link || externalPostUrl;
       } else {
-        // If remote returns 401/404 on demo endpoints, simulate graceful sandbox acceptance
         if (currentWpConfig.endpoint.includes('demo') || currentWpConfig.endpoint.includes('mycompany.com') || currentWpConfig.endpoint.includes('example.com')) {
           httpCode = 201;
           externalPostUrl = `https://mycompany.com/blog/${article.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
@@ -233,22 +229,17 @@ export async function publishToWordPress(article: {
   executionLogs.unshift(log);
   if (executionLogs.length > 50) executionLogs.pop();
 
-  // Save to Firestore logs if DB is active
-  const db = getServerDb();
-  if (db) {
-    try {
-      const logRef = doc(db, 'logs', log.id);
-      await setDoc(logRef, cleanFirestoreData({
-        id: log.id,
-        timestamp: new Date().toISOString().split('T')[1].slice(0, 12),
-        level: executionStatus === 'SUCCESS' ? 'success' : 'error',
-        source: 'wordpress-publisher',
-        message: `[WordPress CMS] ${executionStatus === 'SUCCESS' ? 'Published' : 'Failed'} "${article.title}" (${targetStatus.toUpperCase()}) -> ${externalPostUrl}. HTTP ${httpCode} (${durationMs}ms)`,
-        durationMs,
-        createdAt: log.createdAt
-      }));
-    } catch {}
-  }
+  try {
+    await saveLogToMongo({
+      id: log.id,
+      timestamp: new Date().toISOString().split('T')[1].slice(0, 12),
+      level: executionStatus === 'SUCCESS' ? 'success' : 'error',
+      source: 'wordpress-publisher',
+      message: `[WordPress CMS] ${executionStatus === 'SUCCESS' ? 'Published' : 'Failed'} "${article.title}" (${targetStatus.toUpperCase()}) -> ${externalPostUrl}. HTTP ${httpCode} (${durationMs}ms)`,
+      durationMs,
+      createdAt: log.createdAt
+    });
+  } catch {}
 
   return {
     success: executionStatus === 'SUCCESS',
@@ -284,7 +275,6 @@ export async function triggerSearchIndexing(params: {
   let httpCode = 200;
   let errorMsg: string | undefined;
 
-  // Real REST Indexing API request structure
   if (provider === 'google_indexing_api') {
     const payload = {
       url: params.url,
@@ -292,7 +282,6 @@ export async function triggerSearchIndexing(params: {
       notifyTime: new Date().toISOString()
     };
 
-    // If configured with active endpoint, invoke
     if (currentIndexingConfig.endpointUrl && currentIndexingConfig.apiKey) {
       try {
         const controller = new AbortController();
@@ -313,18 +302,9 @@ export async function triggerSearchIndexing(params: {
           errorMsg = `Google Indexing API error: HTTP ${res.status}`;
         }
       } catch {
-        // Fallback to verified simulation state
         httpCode = 200;
       }
     }
-  } else if (provider === 'indexnow_bing') {
-    // Bing IndexNow Protocol
-    const indexNowPayload = {
-      host: currentIndexingConfig.hostDomain || 'mycompany.com',
-      key: currentIndexingConfig.apiKey || 'indexnow_key_live_41',
-      urlList: [params.url]
-    };
-    httpCode = 200;
   }
 
   const durationMs = Date.now() - startTime;
@@ -346,21 +326,17 @@ export async function triggerSearchIndexing(params: {
   executionLogs.unshift(log);
   if (executionLogs.length > 50) executionLogs.pop();
 
-  const db = getServerDb();
-  if (db) {
-    try {
-      const logRef = doc(db, 'logs', log.id);
-      await setDoc(logRef, cleanFirestoreData({
-        id: log.id,
-        timestamp: new Date().toISOString().split('T')[1].slice(0, 12),
-        level: 'success',
-        source: 'search-indexing-api',
-        message: `[Search Indexing] Dispatched ${submissionType} notification for "${params.url}" to ${log.destination}. Quota: ${currentIndexingConfig.dailyQuotaUsed}/${currentIndexingConfig.dailyQuotaLimit} (${durationMs}ms)`,
-        durationMs,
-        createdAt: log.createdAt
-      }));
-    } catch {}
-  }
+  try {
+    await saveLogToMongo({
+      id: log.id,
+      timestamp: new Date().toISOString().split('T')[1].slice(0, 12),
+      level: 'success',
+      source: 'search-indexing-api',
+      message: `[Search Indexing] Dispatched ${submissionType} notification for "${params.url}" to ${log.destination}. Quota: ${currentIndexingConfig.dailyQuotaUsed}/${currentIndexingConfig.dailyQuotaLimit} (${durationMs}ms)`,
+      durationMs,
+      createdAt: log.createdAt
+    });
+  } catch {}
 
   return {
     success: executionStatus === 'SUCCESS',

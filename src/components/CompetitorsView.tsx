@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   Search, 
@@ -71,7 +71,7 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [blogUrl, setBlogUrl] = useState('');
   const [feedUrl, setFeedUrl] = useState('');
-  const [immediateActive, setImmediateActive] = useState(true);
+  const [immediateActive, setImmediateActive] = useState(false);
 
   // Probing state
   const [isProbing, setIsProbing] = useState(false);
@@ -357,7 +357,7 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
                   onChange={(e) => setImmediateActive(e.target.checked)}
                   className="rounded bg-white border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
                 />
-                <span className="font-medium">Enable Immediate Active Monitoring (15-min cadence)</span>
+                <span className="font-medium">Enable Active Monitoring Immediately (Default: Paused)</span>
               </label>
 
               <button
@@ -477,33 +477,33 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
       {/* Target Competitor Matrix Table */}
       <div className="bg-white border border-slate-200/90 rounded-2xl shadow-xs overflow-hidden space-y-4 p-5">
         {/* Table Filters & Search */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <div className="flex items-center space-x-2">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center space-x-2.5 shrink-0">
             <Building2 className="w-4 h-4 text-indigo-600" />
-            <h3 className="text-base font-bold text-slate-900 font-mono-tech">
+            <h3 className="text-base font-bold text-slate-900 whitespace-nowrap">
               Target Competitor Matrix
             </h3>
-            <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-telemetry-mono font-medium">
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold whitespace-nowrap">
               {filteredCompetitors.length} sites
             </span>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Start All / Resume All Scrapers Button */}
             {competitors.length > liveScrapersCount && onStartAllCompetitors && (
               <button
                 id="start-all-scrapers-btn"
                 onClick={onStartAllCompetitors}
                 disabled={isScanning || competitors.length === 0}
-                className="w-full sm:w-auto bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-800 border border-emerald-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                className="bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap shrink-0"
                 title="Activate all competitor targets and immediately scrape all sites"
               >
                 {isScanning ? (
-                  <RefreshCw className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-700 animate-spin shrink-0" />
                 ) : (
-                  <Play className="w-3.5 h-3.5 text-emerald-700 fill-emerald-700" />
+                  <Play className="w-3.5 h-3.5 text-emerald-700 fill-emerald-700 shrink-0" />
                 )}
-                <span>{isScanning ? 'Scraping All Sites...' : `Start All & Sweep (${competitors.length})`}</span>
+                <span>{isScanning ? 'Scraping All...' : `Start All (${competitors.length})`}</span>
               </button>
             )}
 
@@ -513,19 +513,19 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
                 id="stop-all-scrapers-btn"
                 onClick={onStopAllCompetitors}
                 disabled={isScanning}
-                className="w-full sm:w-auto bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-800 border border-amber-300 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                className="bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center space-x-1.5 cursor-pointer disabled:opacity-60 whitespace-nowrap shrink-0"
                 title="Pause background polling for all active scrapers"
               >
-                <Pause className="w-3.5 h-3.5 text-amber-700" />
+                <Pause className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                 <span>Stop All</span>
-                <span className="ml-1 px-1.5 py-0.5 bg-amber-200/70 rounded-full text-[10px] font-telemetry-mono font-medium">
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 text-[10px] font-bold font-telemetry-mono">
                   {liveScrapersCount} live
                 </span>
               </button>
             )}
 
             {/* Search */}
-            <div className="relative w-full sm:w-56 lg:w-64">
+            <div className="relative min-w-[180px] max-w-xs flex-1 sm:flex-initial">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -540,7 +540,7 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
             <select
               value={strategyFilter}
               onChange={(e) => setStrategyFilter(e.target.value)}
-              className="w-full sm:w-auto bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 shadow-2xs"
+              className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-none focus:border-indigo-500 shadow-2xs cursor-pointer"
             >
               <option value="all">All Strategies</option>
               <option value="hybrid">Hybrid RSS+Sitemap</option>
@@ -553,12 +553,12 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
             <select
               value={competitorSort}
               onChange={(e) => setCompetitorSort(e.target.value as any)}
-              className="w-full sm:w-auto bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 font-semibold focus:outline-none focus:border-indigo-500 shadow-2xs font-telemetry-mono"
+              className="bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium focus:outline-none focus:border-indigo-500 shadow-2xs cursor-pointer font-telemetry-mono"
             >
-              <option value="articles_desc">Sort: Most Articles First</option>
-              <option value="name_asc">Sort: Name (A to Z)</option>
-              <option value="health_desc">Sort: Highest Health Score</option>
-              <option value="status">Sort: Active Targets First</option>
+              <option value="articles_desc">Sort: Most Articles</option>
+              <option value="name_asc">Sort: Name (A-Z)</option>
+              <option value="health_desc">Sort: Health Score</option>
+              <option value="status">Sort: Active First</option>
             </select>
           </div>
         </div>
@@ -591,7 +591,7 @@ export const CompetitorsView: React.FC<CompetitorsViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                paginatedCompetitors.map((comp) => {
+                paginatedCompetitors.map((comp: Competitor) => {
                   const isActive = comp.status === 'Active';
                   const isThisCrawling = crawlingId === comp.id;
                   const isMenuOpen = openMenuCompId === comp.id;
